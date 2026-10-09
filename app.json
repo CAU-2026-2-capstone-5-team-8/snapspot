@@ -1,23 +1,58 @@
 {
   "expo": {
-    "name": "snapspot",
+    "name": "SnapSpot",
     "slug": "snapspot",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.capstone.snapspot"
     },
     "android": {
+      "package": "com.capstone.snapspot",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED"
+      ],
+      "predictiveBackGestureEnabled": false,
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
     },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "저장한 장소 근처에 도착하면 알려 드리기 위해 위치를 사용해요.",
+          "locationWhenInUsePermission": "저장한 장소까지의 거리를 보여 드리기 위해 위치를 사용해요.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "isIosBackgroundLocationEnabled": true
+        }
+      ],
+      "expo-task-manager",
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "스크린샷에서 장소를 찾기 위해 사진에 접근해요."
+        }
+      ]
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     }
