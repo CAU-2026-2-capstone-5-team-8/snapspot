@@ -1,8 +1,5 @@
-import { registerRootComponent } from 'expo';
-
-// Background tasks must be defined at the top level, before the app component registers.
+// Background tasks must be defined at the top level, before the router loads any screen,
+// so they exist when Android/iOS wakes the app up for a geofence event.
 import './src/background';
 
-import App from './App';
-
-registerRootComponent(App);
+import 'expo-router/entry';

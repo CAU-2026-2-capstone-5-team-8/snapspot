@@ -6,14 +6,16 @@
 SnapSpot은 스크린샷에서 장소를 뽑아 두었다가, 앱이 꺼져 있어도 그 장소 반경에 들어가면 알림을 보내요.
 
 <p>
-  <img src="docs/screenshots/home.png" width="260" alt="저장한 곳 목록. 근처에 있는 카페 카드에 '지금 근처예요' 노란 띠가 붙어 있다" />
-  <img src="docs/screenshots/confirm.png" width="260" alt="새 장소 확인 화면. 스크린샷에서 읽은 이름, 분류, 메모, 주소, 종료일" />
-  <img src="docs/screenshots/match.png" width="260" alt="카카오맵 매칭 결과 '더현대 서울 93%'와 다른 후보 목록, 알림 반경 선택" />
+  <img src="docs/screenshots/map.png" width="200" alt="지도 화면. 저장한 카페의 스크린샷이 핀으로 꽂혀 있고, 지금 근처라 알림 반경이 노랗게 칠해져 있다" />
+  <img src="docs/screenshots/reading.png" width="200" alt="스크린샷 읽는 중. 형광펜 띠가 스크린샷 위를 훑고, 아래에 진행 단계가 보인다" />
+  <img src="docs/screenshots/confirm.png" width="200" alt="새 장소 확인. 읽어 낸 이름, 분류, 메모, 주소, 종료일과 카카오맵 매칭 결과 '더현대 서울 93%'" />
+  <img src="docs/screenshots/list.png" width="200" alt="저장한 곳 목록. 근처에 있는 카페 카드에 '지금 근처예요' 노란 띠가 붙어 있다" />
 </p>
 
 **디자인**: "지도 위 형광펜". 지도 종이색 바탕에 공원 초록을 주요 동작 색으로 쓰고, 형광 노랑은 "지금 근처예요" 한 가지 뜻에만 써요.
-카드마다 사용자가 찍은 스크린샷을 그대로 보여 줘서 "내가 저장한 그 게시물"을 바로 알아볼 수 있어요.
-글꼴은 Black Han Sans(제목, 거리)와 IBM Plex Sans KR(본문)을 앱에 내장했어요.
+- **지도**: 저장한 장소마다 사용자가 찍은 스크린샷이 핀이 돼요. 핀이나 아래 카드를 넘기면 서로 따라 움직여요.
+- **추가**: 스크린샷을 읽는 동안 형광펜 띠가 이미지를 훑어요. 앱에서 유일하게 혼자 움직이는 부분이에요.
+- 글꼴은 Black Han Sans(제목, 거리)와 IBM Plex Sans KR(본문)을 앱에 내장했어요.
 
 ## 동작 흐름
 
@@ -37,8 +39,12 @@ SnapSpot은 스크린샷에서 장소를 뽑아 두었다가, 앱이 꺼져 있�
 ## 폴더 구조
 
 ```
-index.ts            앱 진입점 (백그라운드 작업을 먼저 등록)
-App.tsx             화면과 흐름 (추가 · 확인 · 목록)
+index.ts            앱 진입점 (백그라운드 작업을 먼저 등록한 뒤 Expo Router 시작)
+src/app/(tabs)/index.tsx  지도 화면 (스크린샷 핀 · 알림 반경 · 장소 카드 넘기기)
+src/app/(tabs)/list.tsx   목록 화면 (권한 안내 · 장소 카드)
+src/app/add.tsx     장소 추가 (스크린샷 읽기 → 카카오 매칭 → 확인)
+src/state/places.tsx  화면들이 함께 쓰는 상태와 동작 (권한, 위치 감시, 저장)
+src/map/            지도: WebView 안의 MapLibre + OpenFreeMap 타일(키 없음), 앱 색에 맞춘 지도 스타일
 src/ui/theme.ts     색 · 글꼴 · 간격 토큰
 src/ui/components.tsx  버튼, 장소 카드, 매칭 결과, 반경 선택 등 화면 부품
 src/gemini.ts       스크린샷 → 장소 정보 추출 (Gemini REST, JSON 스키마 강제)

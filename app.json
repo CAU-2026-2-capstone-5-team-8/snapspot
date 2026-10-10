@@ -68,10 +68,12 @@
             "./node_modules/@expo-google-fonts/ibm-plex-sans-kr/700Bold/IBMPlexSansKR_700Bold.ttf"
           ]
         }
-      ]
+      ],
+      "expo-router"
     ],
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "scheme": "snapspot"
   }
 }
