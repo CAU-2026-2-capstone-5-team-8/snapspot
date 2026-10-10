@@ -1,5 +1,5 @@
 import { Feather } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { TabList, TabSlot, TabTrigger, Tabs } from 'expo-router/ui';
 import { forwardRef } from 'react';
 import { Pressable, StyleSheet, Text, View, type PressableProps } from 'react-native';
@@ -43,21 +43,37 @@ function AddButton() {
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  // On Android, touches on a modal screen (add, coupon) also reach this bar underneath it, so a
+  // button at the bottom of the modal could switch tabs too. Ignore touches while a modal is up.
+  const path = usePathname();
+  const modalOpen = path.startsWith('/add') || path.startsWith('/coupon/');
   return (
     <Tabs>
       <TabSlot />
       {/* Routes are declared here; the visible bar below uses custom buttons. */}
       <TabList style={{ display: 'none' }}>
         <TabTrigger name="map" href="/" />
+        <TabTrigger name="coupons" href="/coupons" />
         <TabTrigger name="list" href="/list" />
+        <TabTrigger name="status" href="/status" />
       </TabList>
-      <View style={[t.bar, { paddingBottom: Math.max(insets.bottom, space.s) }]}>
+      <View
+        style={[t.bar, { paddingBottom: Math.max(insets.bottom, space.s) }]}
+        pointerEvents={modalOpen ? 'none' : 'auto'}
+        importantForAccessibility={modalOpen ? 'no-hide-descendants' : 'auto'}
+      >
         <TabTrigger name="map" asChild>
           <TabButton icon="map" label="지도" />
         </TabTrigger>
+        <TabTrigger name="coupons" asChild>
+          <TabButton icon="tag" label="쿠폰함" />
+        </TabTrigger>
         <AddButton />
         <TabTrigger name="list" asChild>
-          <TabButton icon="list" label="목록" />
+          <TabButton icon="bookmark" label="장소" />
+        </TabTrigger>
+        <TabTrigger name="status" asChild>
+          <TabButton icon="activity" label="현황" />
         </TabTrigger>
       </View>
     </Tabs>
@@ -74,7 +90,7 @@ const t = StyleSheet.create({
     borderTopColor: color.line,
     paddingTop: space.s,
   },
-  tab: { alignItems: 'center', gap: 2, minWidth: 72, minHeight: 48, justifyContent: 'center' },
+  tab: { alignItems: 'center', gap: 2, minWidth: 60, minHeight: 48, justifyContent: 'center' },
   label: { fontFamily: font.medium, fontSize: 12, color: color.muted },
   labelOn: { color: color.ink, fontFamily: font.bold },
   add: {

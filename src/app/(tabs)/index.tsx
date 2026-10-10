@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BRANCH_RADIUS_M, REFRESH_RADIUS_M } from '../../background';
 import { distanceMeters, formatDistance } from '../../geo';
 import { SpotMap, type SpotMapHandle } from '../../map/SpotMap';
 import { usePlaces } from '../../state/places';
@@ -11,7 +12,7 @@ import { color, font, space, type } from '../../ui/theme';
 const GAP = space.m;
 
 export default function MapScreen() {
-  const { places, here, alertsOn, watching, justSavedId, clearJustSaved } = usePlaces();
+  const { places, here, alertsOn, watching, justSavedId, clearJustSaved, win } = usePlaces();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const cardW = width - space.xl * 2 - space.l;
@@ -38,7 +39,16 @@ export default function MapScreen() {
 
   return (
     <View style={s.screen}>
-      <SpotMap ref={map} places={places} here={here} selectedId={selectedId} onSelect={(id) => select(id, 'map')} />
+      <SpotMap
+        ref={map}
+        places={places}
+        here={here}
+        selectedId={selectedId}
+        onSelect={(id) => select(id, 'map')}
+        win={win}
+        branchRadius={BRANCH_RADIUS_M}
+        refreshRadius={REFRESH_RADIUS_M}
+      />
 
       <View style={[s.top, { paddingTop: insets.top + space.s }]} pointerEvents="box-none">
         <View style={s.brand}>

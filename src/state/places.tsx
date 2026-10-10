@@ -7,13 +7,26 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, AppState, Platform } from 'react-native';
-import { backgroundSupported, syncGeofences } from '../background';
+import { backgroundSupported, syncGeofences, type WatchSummary } from '../background';
 import { distanceMeters, geocodePlace, type Coords } from '../geo';
 import { extractPlace, hasGeminiKey } from '../gemini';
 import { hasKakaoKey, searchPlace, type Candidate } from '../kakao';
-import { notificationsGranted, notifyIfAllowed, setupNotifications } from '../notify';
-import { loadPlaces, removePlace, upsertPlace } from '../storage';
-import type { Place } from '../types';
+import { notificationsGranted, notifyBranch, notifyIfAllowed, setupNotifications } from '../notify';
+import { brandKey } from '../brand';
+import { nearbyBranches, type Branch } from '../branches';
+import {
+  loadCoupons,
+  loadPlaces,
+  loadWindow,
+  removeCoupon,
+  removePlace,
+  updateCoupons,
+  upsertCoupon,
+  upsertPlace,
+  branchCache,
+  type WindowState,
+} from '../storage';
+import type { Coupon, Place } from '../types';
 
 export const RADII = [100, 200, 300, 500] as const;
 export type Radius = (typeof RADII)[number];
@@ -24,6 +37,10 @@ const MIN_AUTO_MATCH = 0.4;
 export type Draft = {
   /** reading: Gemini is reading the screenshot. locating: searching maps. ready: user confirms. */
   stage: 'reading' | 'locating' | 'ready';
+  /** What gets saved: a place, or a franchise coupon (alerts at any branch). */
+  kind: 'place' | 'coupon';
+  brand: string;
+  benefit: string;
   imageUri: string;
   name: string;
   address: string;
@@ -32,6 +49,8 @@ export type Draft = {
   endDate: string;
   coords: Coords | null;
   isPlace: boolean;
+  /** Coupons only: branches of the brand near the user, for a preview before saving. */
+  branches: Branch[] | null;
   /** Kakao result the pin came from, if any. */
   matched: Candidate | null;
   candidates: Candidate[];
@@ -65,13 +84,31 @@ function usePlacesState() {
   const [here, setHere] = useState<Coords | null>(null);
   const [perms, setPerms] = useState<Perms>({ notif: false, fg: false, bg: false, net: true });
   const [bgOk, setBgOk] = useState(false);
-  const [watching, setWatching] = useState({ active: 0, total: 0 });
+  const [watching, setWatching] = useState<WatchSummary>({ active: 0, byGroup: {}, requests: 0 });
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
+  /** The plan registered with the OS, for the status screen and branch pins on the map. */
+  const [win, setWin] = useState<WindowState | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   /** The place saved last, so the map can show where it landed. */
   const [justSavedId, setJustSavedId] = useState<string | null>(null);
   const placesRef = useRef<Place[]>([]);
   placesRef.current = places;
+  const hereRef = useRef<Coords | null>(null);
+  hereRef.current = here;
+
+  /** Branches of `brand` around the user, nearest first; null when the position is unknown. */
+  const previewBranches = useCallback(async (brand: string): Promise<Branch[] | null> => {
+    const at = hereRef.current;
+    if (!at || !brand) return null;
+    try {
+      const { branches } = await nearbyBranches(brand, at, { cache: branchCache });
+      return [...branches].sort((a, b) => distanceMeters(at, a) - distanceMeters(at, b));
+    } catch (e) {
+      console.warn('branch preview failed', e);
+      return null;
+    }
+  }, []);
 
   const refreshPerms = useCallback(async (ask = false) => {
     const [fg, bg, providers] = await Promise.all([
@@ -90,6 +127,7 @@ function usePlacesState() {
     async (at?: Coords | null) => {
       try {
         setWatching(await syncGeofences(at ?? here));
+        setWin(await loadWindow());
       } catch (e) {
         console.warn('geofence sync failed', e);
       }
@@ -101,6 +139,8 @@ function usePlacesState() {
   useEffect(() => {
     (async () => {
       setPlaces(await loadPlaces());
+      setCoupons(await loadCoupons());
+      setWin(await loadWindow());
       await refreshPerms(true);
     })();
   }, [refreshPerms]);
@@ -138,7 +178,7 @@ function usePlacesState() {
   // Keep OS geofences in sync with saved places.
   useEffect(() => {
     if (perms.bg) resync();
-  }, [places.length, perms.bg]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [places.length, perms.bg, here === null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const enableNetworkLocation = useCallback(async () => {
     if (Platform.OS !== 'android') return;
@@ -175,6 +215,10 @@ function usePlacesState() {
     const uri = picked.assets[0].uri;
     const base: Draft = {
       stage: 'reading',
+      kind: 'place',
+      brand: '',
+      benefit: '',
+      branches: null,
       imageUri: uri,
       name: '',
       address: '',
@@ -205,8 +249,16 @@ function usePlacesState() {
           note: ex.note,
           endDate: ex.endDate ?? '',
           isPlace: ex.isPlace,
+          kind: ex.kind,
+          brand: ex.brand,
+          benefit: ex.benefit,
         };
         setDraft(read);
+        if (ex.kind === 'coupon') {
+          const branches = await previewBranches(ex.brand);
+          setDraft((d) => (d && d.imageUri === read.imageUri ? { ...d, branches, stage: 'ready' } : d));
+          return;
+        }
         const located: Located = ex.isPlace
           ? await locate(ex.name, ex.address, ex.category)
           : { coords: null, matched: null, candidates: [] };
@@ -251,9 +303,27 @@ function usePlacesState() {
     if (loc) updateDraft({ coords: { latitude: loc.latitude, longitude: loc.longitude }, matched: null });
   }, [here, updateDraft]);
 
-  /** Returns the saved place, or null when there is nothing to save yet. */
-  const saveDraft = useCallback(async (): Promise<Place | null> => {
-    if (!draft?.coords) return null;
+  /** Saves the draft as a place or a coupon. Returns what was saved, or null when not ready. */
+  const saveDraft = useCallback(async (): Promise<{ kind: 'place' | 'coupon'; id: string } | null> => {
+    if (!draft) return null;
+    if (draft.kind === 'coupon') {
+      if (!draft.brand.trim()) return null;
+      const coupon: Coupon = {
+        id: `c_${Date.now().toString(36)}`,
+        brand: draft.brand.trim(),
+        benefit: draft.benefit.trim() || '쿠폰',
+        expiresAt: /^\d{4}-\d{2}-\d{2}$/.test(draft.endDate) ? draft.endDate : null,
+        imageUri: draft.imageUri,
+        createdAt: Date.now(),
+        usedAt: null,
+        lastNotifiedAt: null,
+      };
+      setCoupons(await upsertCoupon(coupon));
+      setDraft(null);
+      await resync();
+      return { kind: 'coupon', id: coupon.id };
+    }
+    if (!draft.coords) return null;
     const place: Place = {
       id: `p_${Date.now().toString(36)}`,
       name: draft.name || '이름 없는 장소',
@@ -274,8 +344,60 @@ function usePlacesState() {
     setJustSavedId(place.id);
     setDraft(null);
     await resync();
-    return place;
+    return { kind: 'place', id: place.id };
   }, [draft, resync]);
+
+  /** Switching a draft between place and coupon (Gemini can guess wrong). */
+  const setDraftKind = useCallback(
+    async (kind: 'place' | 'coupon') => {
+      if (!draft || draft.kind === kind) return;
+      if (kind === 'coupon') {
+        const brand = draft.brand || draft.name;
+        updateDraft({ kind, brand, branches: null });
+        updateDraft({ branches: await previewBranches(brand) });
+      } else {
+        updateDraft({ kind });
+        if (!draft.coords) updateDraft(await locate(draft.name, draft.address, draft.category));
+      }
+    },
+    [draft, updateDraft, previewBranches],
+  );
+
+  const refreshBranchPreview = useCallback(async () => {
+    if (!draft) return;
+    setBusy(true);
+    updateDraft({ branches: await previewBranches(draft.brand) });
+    setBusy(false);
+  }, [draft, updateDraft, previewBranches]);
+
+  const markCouponUsed = useCallback(async (c: Coupon) => {
+    setCoupons(await updateCoupons([c.id], { usedAt: Date.now() }));
+  }, []);
+
+  /** Asks first; `onDeleted` runs after removal (the coupon screen closes itself with it). */
+  const deleteCoupon = useCallback((c: Coupon, onDeleted?: () => void) => {
+    Alert.alert(`${c.brand} 쿠폰 삭제`, '이 쿠폰의 지점 알림도 함께 꺼져요.', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: async () => {
+          onDeleted?.();
+          setCoupons(await removeCoupon(c.id));
+        },
+      },
+    ]);
+  }, []);
+
+  /** Show the alert a branch would send, using the nearest registered branch of this brand. */
+  const testCoupon = useCallback(
+    (c: Coupon) => {
+      const key = brandKey(c.brand);
+      const id = Object.keys(win?.branches ?? {}).find((k) => k.startsWith(`b|${key}|`)) ?? `b|${key}|test`;
+      return notifyBranch(id, { force: true });
+    },
+    [win],
+  );
 
   const deletePlace = useCallback((p: Place) => {
     Alert.alert(`${p.name} 삭제`, '이 장소의 근처 알림도 함께 꺼져요.', [
@@ -285,6 +407,11 @@ function usePlacesState() {
   }, []);
 
   const testNotify = useCallback((p: Place) => notifyIfAllowed(p.id, { force: true }), []);
+
+  // Used and resynced coupons change what the window registers.
+  useEffect(() => {
+    if (perms.bg) resync();
+  }, [coupons.filter((c) => !c.usedAt).length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sorted = useMemo(() => {
     if (!here) return places;
@@ -300,6 +427,14 @@ function usePlacesState() {
     bgOk,
     alertsOn,
     watching: perms.net ? watching.active : 0,
+    watchSummary: watching,
+    win,
+    coupons,
+    setDraftKind,
+    refreshBranchPreview,
+    markCouponUsed,
+    deleteCoupon,
+    testCoupon,
     draft,
     busy,
     justSavedId,

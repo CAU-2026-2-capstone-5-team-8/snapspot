@@ -322,7 +322,7 @@ const r = StyleSheet.create({
   pct: { fontFamily: font.medium, fontSize: 14, color: color.muted },
 });
 
-export function Segmented<T extends number>(props: {
+export function Segmented<T extends string | number>(props: {
   options: readonly T[];
   value: T;
   onChange: (v: T) => void;
@@ -354,4 +354,141 @@ const sg = StyleSheet.create({
   itemOn: { backgroundColor: color.surface, borderWidth: 1, borderColor: color.line },
   text: { fontFamily: font.medium, fontSize: 14, color: color.muted },
   textOn: { color: color.ink, fontFamily: font.bold },
+});
+
+/** "D-21", "오늘까지", or null without an expiry date. */
+export function dDay(days: number | null): string | null {
+  if (days === null) return null;
+  if (days < 0) return '기간 지남';
+  return days === 0 ? '오늘까지' : `D-${days}`;
+}
+
+/**
+ * A coupon as a ticket: perforation between what it is and where to use it.
+ * The yellow band means the same as on place cards: a branch is near right now.
+ */
+export function TicketCard(props: {
+  brand: string;
+  benefit: string;
+  imageUri: string | null;
+  expiresLabel: string | null;
+  days: number | null;
+  nearest: { name: string; distance: number } | null;
+  near: boolean;
+  dimmed?: boolean;
+  onPress: () => void;
+}) {
+  const urgent = props.days !== null && props.days <= 3 && !props.dimmed;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${props.brand} ${props.benefit} 쿠폰 열기`}
+      onPress={props.onPress}
+      style={({ pressed }) => [tk.card, props.near && tk.cardNear, props.dimmed && tk.dimmed, pressed && { opacity: 0.85 }]}
+    >
+      {props.near && props.nearest && (
+        <View style={tk.nearBand}>
+          <Text style={tk.nearText}>지금 근처: {props.nearest.name}</Text>
+        </View>
+      )}
+      <View style={tk.top}>
+        <Shot uri={props.imageUri} width={60} height={80} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={tk.brand} numberOfLines={1}>
+            {props.brand}
+          </Text>
+          <Text style={[type.body, { fontFamily: font.medium }]} numberOfLines={2}>
+            {props.benefit}
+          </Text>
+          {props.expiresLabel && <Text style={type.meta}>{props.expiresLabel}</Text>}
+        </View>
+        {dDay(props.days) && <Text style={[tk.dday, urgent && tk.ddayUrgent]}>{dDay(props.days)}</Text>}
+      </View>
+      <View style={tk.perforation}>
+        <View style={[tk.notch, { left: -9 }]} />
+        <View style={tk.dash} />
+        <View style={[tk.notch, { right: -9 }]} />
+      </View>
+      <Text style={type.meta} numberOfLines={1}>
+        {props.nearest
+          ? `가장 가까운 지점  ${props.nearest.name}  ${formatDistance(props.nearest.distance)}`
+          : props.dimmed
+            ? '알림이 꺼진 쿠폰이에요'
+            : '근처 지점을 찾는 중이에요'}
+      </Text>
+    </Pressable>
+  );
+}
+
+const tk = StyleSheet.create({
+  card: {
+    backgroundColor: color.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: color.line,
+    padding: space.l,
+    gap: space.m,
+    overflow: 'hidden',
+  },
+  cardNear: { borderColor: color.ink, borderWidth: 1.5 },
+  dimmed: { opacity: 0.55 },
+  nearBand: {
+    backgroundColor: color.highlight,
+    marginHorizontal: -space.l,
+    marginTop: -space.l,
+    paddingHorizontal: space.l,
+    paddingVertical: space.s,
+  },
+  nearText: { fontFamily: font.display, fontSize: 15, color: color.ink },
+  top: { flexDirection: 'row', gap: space.m, alignItems: 'flex-start' },
+  brand: { fontFamily: font.display, fontSize: 20, lineHeight: 26, color: color.ink },
+  dday: { fontFamily: font.display, fontSize: 18, color: color.green },
+  ddayUrgent: { color: color.amber },
+  perforation: { height: 18, justifyContent: 'center', marginHorizontal: -space.l },
+  dash: { borderTopWidth: 1.5, borderColor: color.line, borderStyle: 'dashed', marginHorizontal: space.m },
+  notch: {
+    position: 'absolute',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: color.paper,
+    borderWidth: 1,
+    borderColor: color.line,
+  },
+});
+
+/** How the OS geofence slots are shared right now: one segment per group. */
+export function SlotMeter(props: { total: number; parts: { label: string; count: number; tone: string }[] }) {
+  const used = props.parts.reduce((n, p) => n + p.count, 0);
+  return (
+    <View style={{ gap: space.m }}>
+      <View style={sm.track} accessibilityLabel={`${props.total}칸 중 ${used}칸 사용`}>
+        {props.parts
+          .filter((p) => p.count > 0)
+          .map((p) => (
+            <View key={p.label} style={{ flex: p.count, backgroundColor: p.tone }} />
+          ))}
+        <View style={{ flex: Math.max(props.total - used, 0), backgroundColor: color.paper }} />
+      </View>
+      {props.parts.map((p) => (
+        <View key={p.label} style={sm.row}>
+          <View style={[sm.swatch, { backgroundColor: p.tone }]} />
+          <Text style={[type.body, { flex: 1 }]}>{p.label}</Text>
+          <Text style={sm.count}>{p.count}칸</Text>
+        </View>
+      ))}
+      <View style={sm.row}>
+        <View style={[sm.swatch, { backgroundColor: color.paper, borderWidth: 1, borderColor: color.line }]} />
+        <Text style={[type.body, { flex: 1, color: color.muted }]}>비어 있음</Text>
+        <Text style={[sm.count, { color: color.muted }]}>{Math.max(props.total - used, 0)}칸</Text>
+      </View>
+    </View>
+  );
+}
+
+const sm = StyleSheet.create({
+  track: { flexDirection: 'row', height: 14, borderRadius: 7, overflow: 'hidden', gap: 2, backgroundColor: color.surface },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space.s },
+  swatch: { width: 12, height: 12, borderRadius: 3 },
+  count: { fontFamily: font.display, fontSize: 16, color: color.ink },
 });

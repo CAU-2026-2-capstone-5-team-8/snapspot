@@ -1,7 +1,8 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { loadPlaces, markNotified } from './storage';
-import type { Place } from './types';
+import { brandCoolingDown, couponsForBrand } from './coupon';
+import { loadCoupons, loadPlaces, loadWindow, markNotified, updateCoupons } from './storage';
+import type { Coupon, Place } from './types';
 
 export const CHANNEL_ID = 'nearby-places';
 /** Do not alert about the same place more than once in this window. */
@@ -71,6 +72,45 @@ export function notifyIfAllowed(placeId: string, opts: { force?: boolean } = {})
     if (!opts.force && suppressReason(place)) return false;
     await show(place);
     await markNotified(place.id, Date.now());
+    return true;
+  });
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+function endLabel(date: string | null): string {
+  if (!date) return '';
+  const [, m, d] = date.split('-');
+  return ` · ${Number(m)}월 ${Number(d)}일까지`;
+}
+
+async function showCoupon(branchName: string, coupons: Coupon[]): Promise<void> {
+  const [first, ...rest] = coupons;
+  const more = rest.length ? ` 외 ${rest.length}장` : '';
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: `🎟️ ${branchName} 근처예요`,
+      body: `${first.brand} ${first.benefit}${endLabel(first.expiresAt)}${more}`,
+      data: { couponId: first.id },
+    },
+    trigger: Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null,
+  });
+}
+
+/**
+ * A branch geofence was entered (identifier "b|<brandKey>|<kakaoId>"). Alerts with the brand's
+ * active coupons, once per brand per cooldown. Shares the queue with place alerts.
+ */
+export function notifyBranch(regionId: string, opts: { force?: boolean } = {}): Promise<boolean> {
+  const run = queue.then(async () => {
+    const [, key] = regionId.split('|');
+    const coupons = await loadCoupons();
+    const usable = couponsForBrand(coupons, key);
+    if (!usable.length) return false;
+    if (!opts.force && brandCoolingDown(coupons, key)) return false;
+    const branch = (await loadWindow())?.branches[regionId];
+    await showCoupon(branch?.name ?? usable[0].brand, usable);
+    await updateCoupons(usable.map((c) => c.id), { lastNotifiedAt: Date.now() });
     return true;
   });
   queue = run.catch(() => undefined);

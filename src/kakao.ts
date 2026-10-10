@@ -4,7 +4,8 @@
  */
 import { nameVariants, regionHint, scoreCandidate, type Extract, type KakaoDoc } from './match.ts';
 
-const KEY = process.env.EXPO_PUBLIC_KAKAO_REST_KEY ?? '';
+export const KAKAO_KEY = process.env.EXPO_PUBLIC_KAKAO_REST_KEY ?? '';
+const KEY = KAKAO_KEY;
 const BASE = 'https://dapi.kakao.com/v2/local/search';
 
 /** Below this score the top result is shown as a guess, not a confident match. */
@@ -26,9 +27,9 @@ export function hasKakaoKey(key = KEY): boolean {
   return key.length > 0;
 }
 
-type Fetch = (url: string, init: { headers: Record<string, string> }) => Promise<Response>;
+export type Fetch = (url: string, init: { headers: Record<string, string> }) => Promise<Response>;
 
-async function get<T>(path: string, params: Record<string, string>, key: string, fetcher: Fetch): Promise<T[]> {
+export async function kakaoGet<T>(path: string, params: Record<string, string>, key: string, fetcher: Fetch): Promise<T[]> {
   const qs = new URLSearchParams(params).toString();
   const res = await fetcher(`${BASE}/${path}.json?${qs}`, { headers: { Authorization: `KakaoAK ${key}` } });
   if (!res.ok) {
@@ -54,7 +55,7 @@ export async function searchPlace(ex: Extract, key = KEY, fetcher: Fetch = fetch
   for (const name of nameVariants(ex.name)) {
     const queries = [[region, name].filter(Boolean).join(' '), name].filter((q, i, arr) => arr.indexOf(q) === i);
     for (const query of queries) {
-      for (const d of await get<KakaoDoc>('keyword', { query, size: '10' }, key, fetcher)) {
+      for (const d of await kakaoGet<KakaoDoc>('keyword', { query, size: '10' }, key, fetcher)) {
         if (!seen.has(d.id)) seen.set(d.id, d);
       }
     }
@@ -74,7 +75,7 @@ export async function searchPlace(ex: Extract, key = KEY, fetcher: Fetch = fetch
   }));
 
   if (ex.address.trim()) {
-    const [a] = await get<AddressDoc>('address', { query: ex.address, size: '1' }, key, fetcher);
+    const [a] = await kakaoGet<AddressDoc>('address', { query: ex.address, size: '1' }, key, fetcher);
     if (a) {
       out.push({
         kakaoId: null,

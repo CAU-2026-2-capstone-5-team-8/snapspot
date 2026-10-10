@@ -35,6 +35,10 @@ export const mapHtml = `<!doctype html>
   .pin.selected { transform: scale(1.18); }
   .pin.selected .frame { border-color: ${color.ink}; }
   .pin.selected .tail { background: ${color.ink}; }
+  .br { width: 26px; height: 26px; border-radius: 50%; background: ${color.surface}; border: 2px solid ${color.ink};
+    display: flex; align-items: center; justify-content: center; font: 700 12px sans-serif; color: ${color.ink};
+    box-shadow: 0 2px 6px rgba(31,43,42,.2); box-sizing: border-box; }
+  .br.near { background: ${color.highlight}; }
   .me { width: 16px; height: 16px; border-radius: 50%; background: ${color.green}; border: 3px solid #fff;
     box-shadow: 0 0 0 6px rgba(45,122,87,.2); box-sizing: border-box; }
 </style>
@@ -51,7 +55,8 @@ L.tileLayer('${TILES}', {
 }).addTo(map);
 map.on('click', () => post({ type: 'tapMap' }));
 
-let markers = {}, circles = {}, me = null, state = { places: [], here: null, selectedId: null };
+let markers = {}, circles = {}, brs = {}, me = null, refresh = null,
+  state = { places: [], branches: [], refresh: null, here: null, selectedId: null };
 
 function pinHtml() { return '<div class="pin"><div class="tail"></div><div class="frame"><img alt="" /></div></div>'; }
 
@@ -84,6 +89,28 @@ function render(fit) {
       if (p.thumb && img.getAttribute('src') !== p.thumb) img.setAttribute('src', p.thumb);
     }
   }
+
+  // Coupon branches currently in the geofence window: small badges with the brand's first letter.
+  const branchIds = new Set((state.branches || []).map((b) => b.id));
+  for (const id of Object.keys(brs)) if (!branchIds.has(id)) { brs[id].remove(); delete brs[id]; }
+  for (const b of state.branches || []) {
+    if (!brs[b.id]) {
+      brs[b.id] = L.marker([b.lat, b.lng], {
+        icon: L.divIcon({ className: '', html: '<div class="br"></div>', iconSize: [26, 26], iconAnchor: [13, 13] }),
+        interactive: false, keyboard: false, title: b.name,
+      }).addTo(map);
+    }
+    const el = brs[b.id].getElement() && brs[b.id].getElement().querySelector('.br');
+    if (el) { el.textContent = b.label; el.classList.toggle('near', !!b.near); }
+  }
+
+  // The refresh region: leaving it makes the app pick nearby spots again.
+  const r = state.refresh;
+  if (r) {
+    if (!refresh) refresh = L.circle([r.lat, r.lng], { radius: r.radius, interactive: false,
+      color: '${color.ink}', weight: 2, opacity: 0.55, dashArray: '8 8', fill: false }).addTo(map);
+    refresh.setLatLng([r.lat, r.lng]).setRadius(r.radius);
+  } else if (refresh) { refresh.remove(); refresh = null; }
 
   if (here) {
     const ll = [here.lat, here.lng];

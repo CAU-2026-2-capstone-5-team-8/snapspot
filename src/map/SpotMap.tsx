@@ -3,6 +3,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { StyleSheet, View } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { distanceMeters, type Coords } from '../geo';
+import type { WindowState } from '../storage';
 import type { Place } from '../types';
 import { color } from '../ui/theme';
 import { mapHtml } from './mapHtml';
@@ -35,8 +36,17 @@ function useThumbs(places: Place[]): Record<string, string> {
 
 export const SpotMap = forwardRef<
   SpotMapHandle,
-  { places: Place[]; here: Coords | null; selectedId: string | null; onSelect: (id: string | null) => void }
->(function SpotMap({ places, here, selectedId, onSelect }, ref) {
+  {
+    places: Place[];
+    here: Coords | null;
+    selectedId: string | null;
+    onSelect: (id: string | null) => void;
+    /** The registered geofence plan: coupon branches and the refresh region. */
+    win: WindowState | null;
+    branchRadius: number;
+    refreshRadius: number;
+  }
+>(function SpotMap({ places, here, selectedId, onSelect, win, branchRadius, refreshRadius }, ref) {
   const web = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
   const fitted = useRef(false);
@@ -60,12 +70,21 @@ export const SpotMap = forwardRef<
       })),
       here: here ? { lat: here.latitude, lng: here.longitude } : null,
       selectedId,
+      branches: Object.entries(win?.branches ?? {}).map(([id, b]) => ({
+        id,
+        name: b.name,
+        label: b.name.trim().charAt(0),
+        lat: b.latitude,
+        lng: b.longitude,
+        near: here ? distanceMeters(here, b) <= branchRadius : false,
+      })),
+      refresh: win?.here ? { lat: win.here.latitude, lng: win.here.longitude, radius: refreshRadius } : null,
     };
     // Fit the camera once, when there is something to show; after that the user owns the camera.
     const fit = !fitted.current && (places.length > 0 || !!here);
     if (fit) fitted.current = true;
     web.current?.injectJavaScript(`window.snap.setData(${JSON.stringify(data)}, ${fit}); true;`);
-  }, [ready, places, here, selectedId, thumbs]);
+  }, [ready, places, here, selectedId, thumbs, win, branchRadius, refreshRadius]);
 
   const onMessage = (e: WebViewMessageEvent) => {
     const msg = JSON.parse(e.nativeEvent.data) as { type: string; id?: string; message?: string };

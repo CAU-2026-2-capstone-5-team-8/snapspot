@@ -3,12 +3,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { distanceMeters } from '../../geo';
 import { suppressReason } from '../../notify';
 import { usePlaces } from '../../state/places';
-import { Notice, PlaceCard, WatchStatus } from '../../ui/components';
+import { PlaceCard, WatchStatus } from '../../ui/components';
 import { color, font, space, type } from '../../ui/theme';
 
 export default function ListScreen() {
-  const { places, here, perms, bgOk, alertsOn, watching, askPermissions, enableNetworkLocation, testNotify, deletePlace } =
-    usePlaces();
+  const { places, here, alertsOn, watching, testNotify, deletePlace } = usePlaces();
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
@@ -25,20 +24,6 @@ export default function ListScreen() {
         </View>
 
         <WatchStatus on={alertsOn} watching={watching} />
-
-        {!(perms.notif && perms.fg && perms.bg) && (
-          <Notice action={{ label: '권한 설정하기', onPress: askPermissions }}>
-            앱을 닫아도 알림을 받으려면 알림 권한과 위치 &quot;항상 허용&quot;이 필요해요.
-          </Notice>
-        )}
-        {perms.bg && bgOk && !perms.net && (
-          <Notice action={{ label: '위치 정확도 켜기', onPress: enableNetworkLocation }}>
-            휴대폰의 &quot;Google 위치 정확도&quot;가 꺼져 있어서 앱을 닫으면 알림이 오지 않아요.
-          </Notice>
-        )}
-        {!bgOk && (
-          <Notice>지금은 앱을 열어 둔 동안만 알려 드려요. 앱을 닫아도 오는 알림은 설치용 빌드(APK)에서 동작해요.</Notice>
-        )}
 
         {places.length === 0 ? (
           <View style={s.empty}>
