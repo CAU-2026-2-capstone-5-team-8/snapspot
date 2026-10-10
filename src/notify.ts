@@ -30,6 +30,11 @@ export async function setupNotifications(): Promise<boolean> {
   return asked.granted;
 }
 
+/** Read-only check, for refreshing status without prompting again. */
+export async function notificationsGranted(): Promise<boolean> {
+  return (await Notifications.getPermissionsAsync()).granted;
+}
+
 /** Why a place should NOT alert right now, or null if it should. */
 export function suppressReason(place: Place, now = Date.now()): string | null {
   if (place.endDate) {
@@ -52,12 +57,22 @@ async function show(place: Place): Promise<void> {
   });
 }
 
+/**
+ * Geofence Enter events often arrive in pairs, and the in-app watcher can fire at the same time.
+ * Run check → show → mark one at a time so the cooldown sees the previous alert.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
 /** Called from the geofence task (app may be closed) and from the in-app watcher. */
-export async function notifyIfAllowed(placeId: string, opts: { force?: boolean } = {}): Promise<boolean> {
-  const place = (await loadPlaces()).find((p) => p.id === placeId);
-  if (!place) return false;
-  if (!opts.force && suppressReason(place)) return false;
-  await show(place);
-  await markNotified(place.id, Date.now());
-  return true;
+export function notifyIfAllowed(placeId: string, opts: { force?: boolean } = {}): Promise<boolean> {
+  const run = queue.then(async () => {
+    const place = (await loadPlaces()).find((p) => p.id === placeId);
+    if (!place) return false;
+    if (!opts.force && suppressReason(place)) return false;
+    await show(place);
+    await markNotified(place.id, Date.now());
+    return true;
+  });
+  queue = run.catch(() => undefined);
+  return run;
 }

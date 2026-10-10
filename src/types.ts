@@ -11,6 +11,9 @@ export type Place = {
   /** Geofence radius in meters. */
   radius: number;
   imageUri: string | null;
+  /** Set when the place was matched through Kakao Local search. */
+  kakaoId?: string | null;
+  placeUrl?: string | null;
   createdAt: number;
   lastNotifiedAt: number | null;
 };

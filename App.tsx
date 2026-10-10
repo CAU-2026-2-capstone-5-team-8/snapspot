@@ -3,26 +3,31 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { backgroundSupported, MAX_REGIONS, syncGeofences } from './src/background';
+import { Alert, AppState, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { backgroundSupported, syncGeofences } from './src/background';
 import { distanceMeters, formatDistance, geocodePlace, type Coords } from './src/geo';
 import { extractPlace, hasGeminiKey } from './src/gemini';
-import { notifyIfAllowed, setupNotifications, suppressReason } from './src/notify';
+import { hasKakaoKey, searchPlace, type Candidate } from './src/kakao';
+import { notificationsGranted, notifyIfAllowed, setupNotifications, suppressReason } from './src/notify';
 import { loadPlaces, removePlace, upsertPlace } from './src/storage';
 import type { Place } from './src/types';
+import {
+  Button,
+  CandidateRow,
+  Field,
+  MatchBox,
+  Notice,
+  PlaceCard,
+  Segmented,
+  Shot,
+  WatchStatus,
+} from './src/ui/components';
+import { color, font, space, type } from './src/ui/theme';
 
-const RADII = [100, 200, 300, 500];
+const RADII = [100, 200, 300, 500] as const;
+/** Below this, the best Kakao hit is offered as a choice but the device geocoder places the pin. */
+const MIN_AUTO_MATCH = 0.4;
 
 type Draft = {
   imageUri: string;
@@ -33,29 +38,62 @@ type Draft = {
   endDate: string;
   coords: Coords | null;
   isPlace: boolean;
+  /** Kakao result the pin came from, if any. */
+  matched: Candidate | null;
+  candidates: Candidate[];
 };
 
-type Perms = { notif: boolean; fg: boolean; bg: boolean };
+type Located = Pick<Draft, 'coords' | 'matched' | 'candidates'>;
+
+/** Kakao Local first (handles shop names), device geocoder as fallback. */
+async function locate(name: string, address: string, category: string): Promise<Located> {
+  let candidates: Candidate[] = [];
+  if (hasKakaoKey() && (name || address)) {
+    try {
+      candidates = (await searchPlace({ name, address, category })).slice(0, 4);
+    } catch (e) {
+      console.warn('kakao search failed', e);
+    }
+  }
+  const best = candidates[0];
+  if (best && best.score >= MIN_AUTO_MATCH) {
+    return { coords: { latitude: best.latitude, longitude: best.longitude }, matched: best, candidates };
+  }
+  return { coords: await geocodePlace(name, address), matched: null, candidates };
+}
+
+/** net: Android "Google Location Accuracy". When it is off, the OS drops every geofence. */
+type Perms = { notif: boolean; fg: boolean; bg: boolean; net: boolean };
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <Home />
+    </SafeAreaProvider>
+  );
+}
+
+function Home() {
   const [places, setPlaces] = useState<Place[]>([]);
   const [here, setHere] = useState<Coords | null>(null);
-  const [perms, setPerms] = useState<Perms>({ notif: false, fg: false, bg: false });
+  const [perms, setPerms] = useState<Perms>({ notif: false, fg: false, bg: false, net: true });
   const [bgOk, setBgOk] = useState(false);
   const [watching, setWatching] = useState({ active: 0, total: 0 });
-  const [radius, setRadius] = useState(200);
+  const [radius, setRadius] = useState<(typeof RADII)[number]>(200);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const placesRef = useRef<Place[]>([]);
   placesRef.current = places;
 
-  const refreshPerms = useCallback(async () => {
-    const [fg, bg] = await Promise.all([
+  const refreshPerms = useCallback(async (ask = false) => {
+    const [fg, bg, providers] = await Promise.all([
       Location.getForegroundPermissionsAsync(),
       Location.getBackgroundPermissionsAsync(),
+      Location.getProviderStatusAsync().catch(() => null),
     ]);
-    const notif = await setupNotifications().catch(() => false);
-    setPerms({ notif, fg: fg.granted, bg: bg.granted });
+    const notif = await (ask ? setupNotifications() : notificationsGranted()).catch(() => false);
+    const net = Platform.OS !== 'android' || providers?.networkAvailable !== false;
+    setPerms({ notif, fg: fg.granted, bg: bg.granted, net });
     setBgOk(await backgroundSupported());
     return { fg: fg.granted, bg: bg.granted };
   }, []);
@@ -72,8 +110,16 @@ export default function App() {
   useEffect(() => {
     (async () => {
       setPlaces(await loadPlaces());
-      await refreshPerms();
+      await refreshPerms(true);
     })();
+  }, [refreshPerms]);
+
+  // Coming back from system settings (location "always", Google Location Accuracy) updates the chips.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshPerms();
+    });
+    return () => sub.remove();
   }, [refreshPerms]);
 
   // In-app watcher: works even in Expo Go, and gives live distances.
@@ -115,6 +161,15 @@ export default function App() {
       }
     }
     await setupNotifications();
+    if ((await refreshPerms()).bg) await enableNetworkLocation();
+  };
+
+  const enableNetworkLocation = async () => {
+    if (Platform.OS !== 'android') return;
+    const status = await Location.getProviderStatusAsync().catch(() => null);
+    if (status?.networkAvailable === false) {
+      await Location.enableNetworkProviderAsync().catch(() => undefined);
+    }
     await refreshPerms();
   };
 
@@ -133,8 +188,10 @@ export default function App() {
       const rendered = await ctx.renderAsync();
       const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, base64: true, compress: 0.8 });
       const ex = await extractPlace(saved.base64 ?? '');
-      setBusy('지도에서 위치를 찾는 중…');
-      const coords = ex.isPlace ? await geocodePlace(ex.name, ex.address) : null;
+      setBusy('지도에서 장소를 찾는 중…');
+      const located: Located = ex.isPlace
+        ? await locate(ex.name, ex.address, ex.category)
+        : { coords: null, matched: null, candidates: [] };
       setDraft({
         imageUri: saved.uri,
         name: ex.name,
@@ -142,8 +199,8 @@ export default function App() {
         category: ex.category,
         note: ex.note,
         endDate: ex.endDate ?? '',
-        coords,
         isPlace: ex.isPlace,
+        ...located,
       });
     } catch (e) {
       Alert.alert('분석 실패', e instanceof Error ? e.message : String(e));
@@ -155,16 +212,27 @@ export default function App() {
   const regeocode = async () => {
     if (!draft) return;
     setBusy('다시 찾는 중…');
-    const coords = await geocodePlace(draft.name, draft.address);
-    setDraft({ ...draft, coords });
+    const located = await locate(draft.name, draft.address, draft.category);
+    setDraft({ ...draft, ...located });
     setBusy(null);
-    if (!coords) Alert.alert('위치를 못 찾았어요', '주소를 더 구체적으로 고치거나 "현재 위치로"를 눌러 주세요.');
+    if (!located.coords) Alert.alert('위치를 못 찾았어요', '주소를 더 구체적으로 고치거나 "현재 위치로"를 눌러 주세요.');
+  };
+
+  const pickCandidate = (c: Candidate) => {
+    if (!draft) return;
+    setDraft({
+      ...draft,
+      name: c.source === 'keyword' ? c.name : draft.name,
+      address: c.address,
+      coords: { latitude: c.latitude, longitude: c.longitude },
+      matched: c,
+    });
   };
 
   const useHere = async () => {
     if (!draft) return;
     const loc = here ?? (await Location.getCurrentPositionAsync({}).then((l) => l.coords).catch(() => null));
-    if (loc) setDraft({ ...draft, coords: { latitude: loc.latitude, longitude: loc.longitude } });
+    if (loc) setDraft({ ...draft, coords: { latitude: loc.latitude, longitude: loc.longitude }, matched: null });
   };
 
   const saveDraft = async () => {
@@ -180,6 +248,8 @@ export default function App() {
       longitude: draft.coords.longitude,
       radius,
       imageUri: draft.imageUri,
+      kakaoId: draft.matched?.kakaoId ?? null,
+      placeUrl: draft.matched?.placeUrl ?? null,
       createdAt: Date.now(),
       lastNotifiedAt: null,
     };
@@ -189,8 +259,11 @@ export default function App() {
     await resync();
   };
 
-  const deletePlace = async (id: string) => {
-    setPlaces(await removePlace(id));
+  const deletePlace = (p: Place) => {
+    Alert.alert(`${p.name} 삭제`, '이 장소의 근처 알림도 함께 꺼져요.', [
+      { text: '취소', style: 'cancel' },
+      { text: '삭제', style: 'destructive', onPress: async () => setPlaces(await removePlace(p.id)) },
+    ]);
   };
 
   const sorted = useMemo(() => {
@@ -198,182 +271,163 @@ export default function App() {
     return [...places].sort((a, b) => distanceMeters(here, a) - distanceMeters(here, b));
   }, [places, here]);
 
-  return (
-    <SafeAreaView style={s.safe}>
-      <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={s.body}>
-        <Text style={s.title}>SnapSpot</Text>
-        <Text style={s.subtitle}>찍어 둔 스크린샷 속 장소, 근처를 지나갈 때 알려 드려요</Text>
+  const alertsOn = perms.notif && perms.fg && perms.bg && bgOk && perms.net;
+  const otherCandidates = draft ? draft.candidates.filter((c) => c !== draft.matched).slice(0, 3) : [];
 
-        <View style={s.statusRow}>
-          <Chip ok={perms.notif} label="알림" />
-          <Chip ok={perms.fg} label="위치" />
-          <Chip ok={perms.bg && bgOk} label="앱 밖 알림" />
-          <Text style={s.statusText}>
-            감시 {watching.active}/{Math.min(watching.total, MAX_REGIONS) || places.length}곳
+  return (
+    <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
+      <StatusBar style="dark" />
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+        <View style={s.header}>
+          <Text style={type.hero} accessibilityRole="header">
+            SnapSpot
           </Text>
+          <Text style={[type.body, { color: color.muted }]}>찍어 둔 곳 근처에 가면 알려 드려요</Text>
         </View>
+
+        <WatchStatus on={alertsOn} watching={perms.net ? watching.active : 0} />
+
         {!(perms.notif && perms.fg && perms.bg) && (
-          <Button label="권한 설정하기" onPress={askPermissions} kind="ghost" />
+          <Notice action={{ label: '권한 설정하기', onPress: askPermissions }}>
+            앱을 닫아도 알림을 받으려면 알림 권한과 위치 &quot;항상 허용&quot;이 필요해요.
+          </Notice>
+        )}
+        {perms.bg && bgOk && !perms.net && (
+          <Notice action={{ label: '위치 정확도 켜기', onPress: enableNetworkLocation }}>
+            휴대폰의 &quot;Google 위치 정확도&quot;가 꺼져 있어서 앱을 닫으면 알림이 오지 않아요.
+          </Notice>
         )}
         {!bgOk && (
-          <Text style={s.warn}>
-            지금은 앱 안에서만 알림이 와요. 앱이 꺼져 있을 때 알림은 설치용 빌드(APK)에서 동작해요.
-          </Text>
+          <Notice>지금은 앱을 열어 둔 동안만 알려 드려요. 앱을 닫아도 오는 알림은 설치용 빌드(APK)에서 동작해요.</Notice>
         )}
 
-        <Button label="📷 스크린샷에서 장소 추가" onPress={pickScreenshot} disabled={!!busy} />
-        {busy && (
-          <View style={s.busy}>
-            <ActivityIndicator />
-            <Text style={s.busyText}>{busy}</Text>
-          </View>
+        {!draft && (
+          <Button
+            label={busy ?? '스크린샷에서 장소 추가'}
+            onPress={pickScreenshot}
+            busy={!!busy}
+            style={{ marginTop: space.s }}
+          />
         )}
 
         {draft && (
-          <View style={s.card}>
-            <Image source={{ uri: draft.imageUri }} style={s.preview} resizeMode="cover" />
-            {!draft.isPlace && <Text style={s.warn}>장소가 잘 안 보이는 이미지예요. 직접 고쳐 주세요.</Text>}
-            <Field label="장소 이름" value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} />
-            <Field label="주소·위치 단서" value={draft.address} onChange={(v) => setDraft({ ...draft, address: v })} />
-            <Field label="분류" value={draft.category} onChange={(v) => setDraft({ ...draft, category: v })} />
+          <View style={s.sheet}>
+            <View style={s.sheetHead}>
+              <Text style={[type.title, { flex: 1 }]}>새 장소 확인</Text>
+              <Button label="취소" onPress={() => setDraft(null)} kind="quiet" />
+            </View>
+
+            {!draft.isPlace && (
+              <Notice>이 이미지에서는 장소를 찾기 어려웠어요. 이름과 주소를 직접 고쳐 주세요.</Notice>
+            )}
+
+            <View style={s.draftTop}>
+              <Shot uri={draft.imageUri} width={96} height={128} />
+              <View style={{ flex: 1, gap: space.m }}>
+                <Field label="장소 이름" value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} large />
+                <Field label="분류" value={draft.category} onChange={(v) => setDraft({ ...draft, category: v })} />
+              </View>
+            </View>
             <Field label="메모" value={draft.note} onChange={(v) => setDraft({ ...draft, note: v })} />
             <Field
-              label="종료일 (YYYY-MM-DD, 팝업·전시)"
+              label="주소나 위치 단서"
+              value={draft.address}
+              onChange={(v) => setDraft({ ...draft, address: v })}
+            />
+            <Field
+              label="종료일 (팝업·전시만)"
               value={draft.endDate}
               onChange={(v) => setDraft({ ...draft, endDate: v })}
+              placeholder="2026-10-31"
             />
-            <Text style={s.coords}>
-              {draft.coords
-                ? `위치 확인됨 · ${draft.coords.latitude.toFixed(5)}, ${draft.coords.longitude.toFixed(5)}${
-                    here ? ` · 여기서 ${formatDistance(distanceMeters(here, draft.coords))}` : ''
-                  }`
-                : '위치를 아직 못 찾았어요'}
-            </Text>
-            <View style={s.row}>
-              <Button label="주소로 다시 찾기" onPress={regeocode} kind="ghost" small />
-              <Button label="현재 위치로" onPress={useHere} kind="ghost" small />
+
+            <View style={{ gap: space.s }}>
+              <Text style={type.label}>지도에서 찾은 위치</Text>
+              <MatchBox matched={draft.matched} hasCoords={!!draft.coords} />
+              {draft.coords && here && (
+                <Text style={type.meta}>여기서 {formatDistance(distanceMeters(here, draft.coords))}</Text>
+              )}
+              {otherCandidates.length > 0 && (
+                <View style={s.candidates}>
+                  <Text style={[type.label, s.candidatesHead]}>다른 후보</Text>
+                  {otherCandidates.map((c) => (
+                    <CandidateRow key={`${c.source}-${c.kakaoId ?? c.address}`} c={c} onPress={() => pickCandidate(c)} />
+                  ))}
+                </View>
+              )}
+              <View style={s.row}>
+                <Button label="주소로 다시 찾기" onPress={regeocode} kind="secondary" busy={!!busy} style={{ flex: 1 }} />
+                <Button label="지금 위치로" onPress={useHere} kind="secondary" style={{ flex: 1 }} />
+              </View>
             </View>
-            <Text style={s.label}>알림 반경</Text>
-            <View style={s.row}>
-              {RADII.map((r) => (
-                <Pressable key={r} onPress={() => setRadius(r)} style={[s.radius, radius === r && s.radiusOn]}>
-                  <Text style={[s.radiusText, radius === r && s.radiusTextOn]}>{r}m</Text>
-                </Pressable>
-              ))}
+
+            <View style={{ gap: space.s }}>
+              <Text style={type.label}>이만큼 가까워지면 알려 드려요</Text>
+              <Segmented options={RADII} value={radius} onChange={setRadius} format={(r) => `${r}m`} />
             </View>
-            <View style={s.row}>
-              <Button label="취소" onPress={() => setDraft(null)} kind="ghost" small />
-              <Button label="저장" onPress={saveDraft} disabled={!draft.coords} small />
-            </View>
+
+            <Button label="저장" onPress={saveDraft} disabled={!draft.coords} />
           </View>
         )}
 
-        <Text style={s.section}>저장한 장소 {places.length}곳</Text>
-        {sorted.length === 0 && <Text style={s.empty}>아직 없어요. 맛집이나 팝업 스크린샷을 추가해 보세요.</Text>}
-        {sorted.map((p) => {
-          const d = here ? distanceMeters(here, p) : null;
-          const reason = suppressReason(p);
-          return (
-            <View key={p.id} style={[s.card, d !== null && d <= p.radius && s.cardNear]}>
-              <View style={s.rowBetween}>
-                <Text style={s.placeName} numberOfLines={1}>{p.name}</Text>
-                <Text style={s.badge}>{p.category}</Text>
-              </View>
-              {!!p.note && <Text style={s.note}>{p.note}</Text>}
-              <Text style={s.meta} numberOfLines={1}>{p.address || '주소 없음'}</Text>
-              <Text style={s.meta}>
-                {d !== null ? `${formatDistance(d)} · ` : ''}반경 {p.radius}m
-                {p.endDate ? ` · ${p.endDate}까지` : ''}
-                {reason ? ` · ${reason}` : ''}
-              </Text>
-              <View style={s.row}>
-                <Button label="알림 테스트" onPress={() => notifyIfAllowed(p.id, { force: true })} kind="ghost" small />
-                <Button label="삭제" onPress={() => deletePlace(p.id)} kind="ghost" small />
-              </View>
-            </View>
-          );
-        })}
+        <View style={s.listHead}>
+          <Text style={type.title}>저장한 곳</Text>
+          {places.length > 0 && (
+            <Text style={type.meta}>
+              {places.length}곳{here ? ', 가까운 순' : ''}
+            </Text>
+          )}
+        </View>
+
+        {sorted.length === 0 ? (
+          <View style={s.empty}>
+            <Text style={[type.body, { fontFamily: font.medium }]}>아직 저장한 곳이 없어요</Text>
+            <Text style={type.meta}>
+              인스타 맛집이나 팝업 포스터 스크린샷을 추가하면 장소를 찾아 저장하고, 근처에 가면 알려 드려요.
+            </Text>
+          </View>
+        ) : (
+          sorted.map((p) => (
+            <PlaceCard
+              key={p.id}
+              place={p}
+              distance={here ? distanceMeters(here, p) : null}
+              status={suppressReason(p)}
+              onTest={() => notifyIfAllowed(p.id, { force: true })}
+              onMap={p.placeUrl ? () => Linking.openURL(p.placeUrl!) : undefined}
+              onDelete={() => deletePlace(p)}
+            />
+          ))
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function Chip({ ok, label }: { ok: boolean; label: string }) {
-  return (
-    <View style={[s.chip, ok ? s.chipOk : s.chipNo]}>
-      <Text style={[s.chipText, ok ? s.chipTextOk : s.chipTextNo]}>{ok ? '✓' : '·'} {label}</Text>
-    </View>
-  );
-}
-
-function Button(props: { label: string; onPress: () => void; disabled?: boolean; kind?: 'solid' | 'ghost'; small?: boolean }) {
-  const ghost = props.kind === 'ghost';
-  return (
-    <Pressable
-      onPress={props.onPress}
-      disabled={props.disabled}
-      style={({ pressed }) => [
-        s.btn,
-        ghost ? s.btnGhost : s.btnSolid,
-        props.small && s.btnSmall,
-        (pressed || props.disabled) && { opacity: 0.6 },
-      ]}
-    >
-      <Text style={[s.btnText, ghost && s.btnTextGhost]}>{props.label}</Text>
-    </Pressable>
-  );
-}
-
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <View style={{ marginTop: 10 }}>
-      <Text style={s.label}>{label}</Text>
-      <TextInput value={value} onChangeText={onChange} style={s.input} placeholder="-" />
-    </View>
-  );
-}
-
-const C = { ink: '#1d1b22', sub: '#6b6780', line: '#e5e1ef', brand: '#4f437a', soft: '#f4f1fa' };
-
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
-  body: { padding: 20, paddingTop: 48, paddingBottom: 60 },
-  title: { fontSize: 30, fontWeight: '800', color: C.ink },
-  subtitle: { fontSize: 15, color: C.sub, marginTop: 4, marginBottom: 16 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
-  statusText: { color: C.sub, fontSize: 13, marginLeft: 4 },
-  chip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-  chipOk: { backgroundColor: '#e3f3ec' },
-  chipNo: { backgroundColor: '#f1eff4' },
-  chipText: { fontSize: 13, fontWeight: '600' },
-  chipTextOk: { color: '#0b5a41' },
-  chipTextNo: { color: '#7a7590' },
-  warn: { color: '#8a5a0a', backgroundColor: '#fbf0d9', padding: 10, borderRadius: 10, marginVertical: 8, fontSize: 13 },
-  btn: { borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16, alignItems: 'center', marginTop: 10 },
-  btnSmall: { paddingVertical: 9, flex: 1 },
-  btnSolid: { backgroundColor: C.brand },
-  btnGhost: { backgroundColor: C.soft },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  btnTextGhost: { color: C.brand },
-  busy: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
-  busyText: { color: C.sub },
-  card: { borderWidth: 1, borderColor: C.line, borderRadius: 16, padding: 14, marginTop: 12, backgroundColor: '#fff' },
-  cardNear: { borderColor: C.brand, backgroundColor: C.soft },
-  preview: { width: '100%', height: 180, borderRadius: 10, backgroundColor: C.soft },
-  label: { fontSize: 12, color: C.sub, marginTop: 10, marginBottom: 4 },
-  input: { borderWidth: 1, borderColor: C.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 15, color: C.ink },
-  coords: { marginTop: 12, fontSize: 13, color: C.brand },
-  row: { flexDirection: 'row', gap: 8 },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  radius: { flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: C.soft, alignItems: 'center' },
-  radiusOn: { backgroundColor: C.brand },
-  radiusText: { color: C.brand, fontWeight: '600' },
-  radiusTextOn: { color: '#fff' },
-  section: { fontSize: 18, fontWeight: '700', color: C.ink, marginTop: 28 },
-  empty: { color: C.sub, marginTop: 8 },
-  placeName: { fontSize: 17, fontWeight: '700', color: C.ink, flex: 1 },
-  badge: { fontSize: 12, color: C.brand, backgroundColor: C.soft, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, overflow: 'hidden' },
-  note: { marginTop: 4, color: C.ink },
-  meta: { marginTop: 4, color: C.sub, fontSize: 13 },
+  safe: { flex: 1, backgroundColor: color.paper },
+  body: { paddingHorizontal: space.l + 4, paddingTop: space.xl, paddingBottom: 64, gap: space.l },
+  header: { gap: space.xs },
+  sheet: {
+    backgroundColor: color.surface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: color.line,
+    padding: space.l + 4,
+    gap: space.l + 4,
+  },
+  sheetHead: { flexDirection: 'row', alignItems: 'center', marginRight: -space.s },
+  draftTop: { flexDirection: 'row', gap: space.m, alignItems: 'flex-start' },
+  candidates: { borderWidth: 1, borderColor: color.line, borderRadius: 12, overflow: 'hidden' },
+  candidatesHead: { paddingHorizontal: space.m, paddingVertical: space.s },
+  row: { flexDirection: 'row', gap: space.s },
+  listHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: space.l },
+  empty: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: color.line,
+    borderRadius: 16,
+    padding: space.xl,
+    gap: space.s,
+  },
 });
