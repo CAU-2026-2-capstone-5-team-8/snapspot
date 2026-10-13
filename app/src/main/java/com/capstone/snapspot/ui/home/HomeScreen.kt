@@ -119,7 +119,7 @@ fun HomeScreen(
     val routeLine = if (open == null) emptyList() else listOfNotNull(open.start) + stops.map { it.at }
     val mapBranches = win?.branches.orEmpty().map { (id, b) ->
         val at = Coords(b.latitude, b.longitude)
-        MapBranch(id, at, initial(b.name), b.urgent, here?.let { distanceMeters(it, at) <= 200 } == true)
+        MapBranch(id, at, b.urgent, here?.let { distanceMeters(it, at) <= 200 } == true)
     }
 
     Box(Modifier.fillMaxSize().background(SnapColors.paper)) {

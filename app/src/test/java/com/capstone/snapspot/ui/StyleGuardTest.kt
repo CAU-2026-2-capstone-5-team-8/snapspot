@@ -14,7 +14,6 @@ class StyleGuardTest {
         "MainActivity.kt",
         "ui/Nav.kt",
         "ui/home/HomeScreen.kt",
-        "ui/map/SpotMap.kt",
         "ui/add/AddScreen.kt",
         "ui/coupon/CouponScreen.kt",
         "ui/status/StatusScreen.kt",

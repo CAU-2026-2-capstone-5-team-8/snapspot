@@ -107,7 +107,7 @@ fun StatusScreen(vm: HomeViewModel, onBack: () -> Unit, onAskPermissions: () -> 
             win?.here?.let { center ->
                 SpotMap(
                     places = places.map { MapPlace(it.id, Coords(it.latitude, it.longitude), it.radius.toDouble(), it.name.take(1), placeEnded(it, now), false) },
-                    branches = win?.branches.orEmpty().map { (id, b) -> MapBranch(id, Coords(b.latitude, b.longitude), b.name.take(1), b.urgent, false) },
+                    branches = win?.branches.orEmpty().map { (id, b) -> MapBranch(id, Coords(b.latitude, b.longitude), b.urgent, false) },
                     here = vm.here.collectAsState().value,
                     focus = MapFocus(center, 0, 14),
                     refresh = center to REFRESH_RADIUS_M,
