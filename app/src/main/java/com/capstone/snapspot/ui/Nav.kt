@@ -131,6 +131,10 @@ fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit, shared: List<Uri>
                 nav.popBackStack("home", inclusive = false)
                 if (id != null) home.focusOn(id)
             }
+            "bundle" -> {
+                nav.popBackStack("home", inclusive = false)
+                if (id != null) home.openBundleFor(id)
+            }
         }
         onDeepLinkHandled()
     }

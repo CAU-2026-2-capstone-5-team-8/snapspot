@@ -23,6 +23,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Switch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MyLocation
@@ -89,6 +93,10 @@ fun HomeScreen(
     val watching by vm.watching.collectAsState()
     val focus by vm.focus.collectAsState()
     val selected by vm.selected.collectAsState()
+    val bundleItems by vm.bundles.collectAsState()
+    val openBundle by vm.openBundle.collectAsState()
+    val couponsOn by vm.withCoupons.collectAsState()
+    val open = bundleItems.firstOrNull { it.bundle.id == openBundle }
     var tab by rememberSaveable { mutableStateOf(Tab.PLACES) }
     var deletingPlace by remember { mutableStateOf<Place?>(null) }
     var deletingCoupon by remember { mutableStateOf<Coupon?>(null) }
@@ -102,9 +110,15 @@ fun HomeScreen(
         if (tab == Tab.PLACES && i >= 0) listState.animateScrollToItem(i)
     }
 
+    // An open bundle numbers its stops in walking order; coupon stops are the branch the route picked.
+    val stops = open?.let { routeStops(it) }.orEmpty()
+    val numberOf = stops.mapIndexedNotNull { i, st -> st.placeId?.let { it to i + 1 } }.toMap()
     val mapPlaces = places.map {
-        MapPlace(it.id, Coords(it.latitude, it.longitude), it.radius.toDouble(), initial(it.name), placeEnded(it, now), it.id == selected)
+        MapPlace(it.id, Coords(it.latitude, it.longitude), it.radius.toDouble(), initial(it.name), placeEnded(it, now), it.id == selected, numberOf[it.id])
+    } + stops.mapIndexedNotNull { i, st ->
+        if (st.placeId != null) null else MapPlace("route-$i", st.at, 0.0, initial(st.name), ended = false, selected = false, number = i + 1)
     }
+    val routeLine = if (open == null) emptyList() else listOfNotNull(open.start) + stops.map { it.at }
     val mapBranches = win?.branches.orEmpty().map { (id, b) ->
         val at = Coords(b.latitude, b.longitude)
         MapBranch(id, at, initial(b.name), b.urgent, here?.let { distanceMeters(it, at) <= 200 } == true)
@@ -125,6 +139,7 @@ fun HomeScreen(
                         here = here,
                         focus = focus,
                         modifier = Modifier.fillMaxSize(),
+                        route = routeLine,
                         onPinClick = { id ->
                             if (places.any { it.id == id }) tab = Tab.PLACES
                             vm.focusOn(id)
@@ -164,12 +179,29 @@ fun HomeScreen(
                             if (coupons.isEmpty()) Empty("스크린샷 한 장으로 시작해 보세요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요.")
                             else Empty("저장한 장소가 없어요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요. 쿠폰은 쿠폰 탭에 있어요.")
                         }
-                        items(places, key = { it.id }) { p ->
+                        if (bundleItems.isNotEmpty()) item {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                items(bundleItems, key = { it.bundle.id }) { b ->
+                                    BundleCard(
+                                        b, open = b.bundle.id == openBundle, withCoupons = b.bundle.id in couponsOn,
+                                        onClick = { vm.toggleBundle(b.bundle.id) }, onCoupons = { vm.toggleCoupons(b.bundle.id) },
+                                    )
+                                }
+                            }
+                        }
+                        // Open bundle: its places in walking order, coupon stops as one-line rows after them.
+                        val shown = if (open != null) stops.mapNotNull { st -> places.firstOrNull { it.id == st.placeId } } else places
+                        items(shown, key = { it.id }) { p ->
                             val d = here?.let { distanceMeters(it, Coords(p.latitude, p.longitude)) }
                             PlaceRow(
                                 p, d, ended = placeEnded(p, now), selected = p.id == selected,
-                                onClick = { vm.focusOn(p.id) }, onLongClick = { deletingPlace = p },
+                                onClick = { vm.focusOn(p.id) }, onLongClick = { deletingPlace = p }, number = numberOf[p.id],
                             )
+                        }
+                        if (open != null) {
+                            items(stops.withIndex().filter { it.value.placeId == null }, key = { "coupon-${it.index}" }) { (i, st) ->
+                                Text("${i + 1}. ${st.name} (쿠폰)", style = SnapType.meta, modifier = Modifier.padding(horizontal = 4.dp))
+                            }
                         }
                     } else {
                         if (coupons.isEmpty()) item { Empty("저장한 쿠폰이 없어요", "기프티콘 스크린샷을 넣으면 그 브랜드 지점 근처에서 알려 드려요.") }
@@ -219,7 +251,7 @@ private fun Empty(title: String, body: String) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PlaceRow(p: Place, distance: Double?, ended: Boolean, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun PlaceRow(p: Place, distance: Double?, ended: Boolean, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, number: Int? = null) {
     val near = distance != null && distance <= p.radius
     Card(
         Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
@@ -228,6 +260,11 @@ private fun PlaceRow(p: Place, distance: Double?, ended: Boolean, selected: Bool
         Column {
             if (near) NearBand("지금 근처예요")
             Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (number != null) {
+                    Box(Modifier.size(24.dp).clip(CircleShape).background(SnapColors.ink), contentAlignment = Alignment.Center) {
+                        Text("$number", style = SnapType.label.copy(color = SnapColors.surface))
+                    }
+                }
                 Shot(p.imageUri, 52.dp, 68.dp)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(p.name, style = SnapType.title.copy(color = if (ended) SnapColors.muted else SnapColors.ink), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -291,4 +328,41 @@ private fun ConfirmDelete(title: String, body: String, onConfirm: () -> Unit, on
         dismissButton = { TextButton(onClick = onDismiss) { Text("취소", color = SnapColors.ink) } },
         containerColor = SnapColors.surface,
     )
+}
+
+/** One stop of an open bundle's route: a saved place, or the branch picked for a coupon brand. */
+private class RouteStop(val placeId: String?, val name: String, val at: Coords)
+
+private fun routeStops(b: BundleItem): List<RouteStop> = b.route.order.indices.map { i ->
+    val s = b.route.order[i]
+    val k = b.route.picks[i]
+    if (s < b.bundle.places.size) {
+        val p = b.bundle.places[s]
+        RouteStop(p.id, p.name, Coords(p.latitude, p.longitude))
+    } else {
+        val br = b.coupons[s - b.bundle.places.size].branches[k]
+        RouteStop(null, br.name, Coords(br.latitude, br.longitude))
+    }
+}
+
+@Composable
+private fun BundleCard(b: BundleItem, open: Boolean, withCoupons: Boolean, onClick: () -> Unit, onCoupons: () -> Unit) {
+    val fg = if (open) SnapColors.surface else SnapColors.ink
+    Column(
+        Modifier.width(220.dp).clip(RoundedCornerShape(16.dp))
+            .background(if (open) SnapColors.ink else SnapColors.surface)
+            .border(1.dp, SnapColors.line, RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(b.name, style = SnapType.title.copy(color = fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("가 볼 곳 ${b.bundle.places.size}곳 · 걸어서 약 ${b.minutes}분", style = SnapType.meta.copy(color = if (open) SnapColors.surface else SnapColors.muted))
+        if (open) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("쿠폰 쓸 곳 포함", style = SnapType.meta.copy(color = fg), modifier = Modifier.weight(1f))
+                Switch(checked = withCoupons, onCheckedChange = { onCoupons() })
+            }
+            if (b.couponsFailed) Text("쿠폰 지점을 불러오지 못했어요", style = SnapType.meta.copy(color = SnapColors.surface))
+        }
+    }
 }
