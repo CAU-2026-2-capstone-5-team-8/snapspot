@@ -310,7 +310,7 @@ private fun f2(v: Double) = String.format(Locale.US, "%.2f", v)
 private fun rows(strategies: List<Strategy>) = strategies.map { st -> Row(st, SEEDS.map { run(st, it) }) }
 
 private fun table(rows: List<Row>) = buildString {
-    appendLine("| 전략 | 저장한 장소 | 쿠폰 알림 (지점을 지난 이동 중) | 지점 방문 전체 | 다시 고른 횟수 / km | 버스로 지나가며 울린 알림 |")
+    appendLine("| 전략 | 저장한 장소 | 쿠폰 알림 (지점을 지난 이동 중) | 지점 방문 전체 | km당 갱신 횟수 | 버스로 지나가며 울린 알림 |")
     appendLine("|---|---|---|---|---|---|")
     for (r in rows) {
         val sum = { f: (Result) -> Int -> r.results.sumOf(f) }
@@ -330,8 +330,8 @@ fun simulationReport(): SimReport {
     val slotSets = listOf(20, 50, 90)
     val grid = slotSets.flatMap { s -> refreshes.map { r -> Strategy("움직이는 창 ${s}칸 · 갱신 ${r.toInt()}m", s, r) } }
     val main = listOf(Strategy("고정 (출발 때 한 번, 90칸)", 90, null, 0)) + grid + listOf(
-        Strategy("움직이는 창 90칸 · 갱신 1000m · 깨어남 지연 0초", 90, 1000.0, 0),
-        Strategy("움직이는 창 90칸 · 갱신 1000m · 깨어남 지연 5분", 90, 1000.0, 300),
+        Strategy("움직이는 창 90칸 · 갱신 1000m · 갱신 지연 0초", 90, 1000.0, 0),
+        Strategy("움직이는 창 90칸 · 갱신 1000m · 갱신 지연 5분", 90, 1000.0, 300),
     )
     val perBrand = listOf(
         Strategy("브랜드당 3곳", 90, 1000.0, cap = 3),
@@ -356,9 +356,9 @@ fun simulationReport(): SimReport {
             series = listOf(50, 90).mapIndexed { i, s -> Series("${s}칸", i + 1, refreshes.map { r -> gridRow(s, r).stat { it.branch }.first }) },
         ),
         "wakeups.svg" to lineChart(
-            title = "갱신 반경별 앱이 깨어난 횟수 (km당)",
+            title = "갱신 반경별 km당 갱신 횟수",
             xLabel = "갱신 반경", xs = refreshes.map { "${it.toInt()}m" }, yLabel = "회/km", percent = false,
-            series = listOf(Series("깨어난 횟수", 2, refreshes.map { r -> gridRow(90, r).stat { it.replansPerKm }.first })),
+            series = listOf(Series("갱신 횟수", 2, refreshes.map { r -> gridRow(90, r).stat { it.replansPerKm }.first })),
         ),
         "saved.svg" to lineChart(
             title = "저장한 장소 수별 쿠폰 알림을 받은 비율 (갱신 1000m)",
@@ -383,13 +383,13 @@ fun simulationReport(): SimReport {
 - **방문**: 장소·지점 반경(200m) 안에 들어간 구간. 그 구간 중 한 순간이라도 그곳이 OS에 등록돼 있으면 "잡은 방문"
 - **쿠폰 알림**: 어떤 브랜드 지점을 하나라도 지나간 외출에서, 그 브랜드 알림이 한 번이라도 울린 비율. **지점 방문 전체**: 지점 하나하나의 방문을 다 잡은 비율
 - **버스로 지나가며 울린 알림**: 지금 앱은 이 알림을 미뤘다가, 근처에서 내려 걸을 때만 울려요
-- 카카오 검색은 실제처럼 격자 칸 중심에서 반경 ${SEARCH_RADIUS_M / 1000.0}km, 최대 ${KAKAO_CAP}곳만 돌려준다고 가정. 깨어나 다시 고르기까지 별도 표시가 없으면 2분
+- 카카오 검색은 실제처럼 격자 칸 중심에서 반경 ${SEARCH_RADIUS_M / 1000.0}km, 최대 ${KAKAO_CAP}곳만 돌려준다고 가정. 갱신 구역을 벗어난 뒤 갱신이 끝나기까지 별도 표시가 없으면 2분
 - 수치는 시드 3개의 평균이고, 괄호는 최솟값–최댓값이에요 (차이가 거의 없으면 생략)
 
 ### 갱신 반경과 칸 수
 
 ![갱신 반경별 지점 방문을 잡은 비율](sim/refresh.svg)
-![갱신 반경별 앱이 깨어난 횟수](sim/wakeups.svg)
+![갱신 반경별 km당 갱신 횟수](sim/wakeups.svg)
 
 ${table(mainRows)}
 저장한 장소는 모든 설정에서 놓친 방문이 없어요. 장소가 우선순위 1순위라 가까운 순으로 먼저 칸을 차지해서, 근처에 가면 늘 등록돼 있어요. 설정에 따라 달라지는 건 쿠폰 쪽이에요.
