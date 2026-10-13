@@ -25,7 +25,7 @@ import kotlin.random.Random
 
 private const val REPEATS = 30
 private val NS = (4..20).toList()
-private const val BRUTE_MAX = 9
+private const val BRUTE_MAX = 11
 private const val HELD_KARP_MAX = 16
 private const val BUDGET_MS = 50.0
 
@@ -98,7 +98,7 @@ class RouteBench {
             title = "장소 수별 계산 시간 (PC 측정, 중앙값)", xLabel = "장소 수 n", xs = NS.map { "$it" }, yLabel = "ms",
             subtitle = "세로축 한 칸 = 10배 (로그 눈금). 1ms 아래의 엇갈림은 측정 잡음이에요",
             series = listOf(
-                Series("완전 탐색", 0, rows.filter { it.brute != null }.map { it.brute!! }, label = "완전 탐색 (${BRUTE_MAX}곳까지만 측정)", labelAbove = true),
+                Series("완전 탐색", 0, rows.filter { it.brute != null }.map { it.brute!! }, label = "완전 탐색 (${BRUTE_MAX}곳까지 측정)", labelBefore = true),
                 Series("Held-Karp", 1, rows.filter { it.hk != null }.map { it.hk!! }),
                 Series("근사", 2, rows.map { it.heur }),
             ), percent = false, logY = true, palette = Palette.CATEGORICAL,
@@ -182,9 +182,19 @@ private fun routeDoc(table: String, cutoff: Int, coupons: String) = """## 동네
 | **가까운 곳부터 잇기 + 2-opt + Or-opt + 지점 다시 고르기** | 한 바퀴 O(g³ + Σkᵢkᵢ₊₁) (구현), 몇 바퀴 반복 | 근사 | ${EXACT_MAX + 1}곳 이상 |
 | 최소 신장 트리(MST, Prim) | O(g²·k²) | 하한 | 근사의 오차 상한 계산 |
 
-- **Held-Karp**: "지금까지 방문한 장소 집합(비트마스크)과 마지막 장소"를 상태로 두고, 각 상태까지의 최단 거리를 작은 집합부터 채워요. 출발점이 없으면 모든 장소를 출발 상태로 둬요.
-- **2-opt**: 경로의 한 구간을 뒤집어 엇갈린 두 선을 풀어요. **Or-opt**: 1~3곳을 떼어 다른 자리에 끼워 넣어요. 둘 다 더 줄지 않을 때까지 반복해요.
-- **MST 하한**: 최소 신장 트리는 어떤 열린 경로보다도 짧거나 같아서, 정답을 모르는 큰 n에서도 "근사가 최적보다 최대 몇 % 길다"를 보장할 수 있어요.
+#### 각 방법을 쉽게 말하면
+
+내 위치에서 출발해 장소 A, B, C, D를 한 번씩 들르는 가장 짧은 순서를 찾는다고 해 볼게요.
+
+- **완전 탐색**: 가능한 순서(A→B→C→D, A→B→D→C, …)를 전부 재 보고 가장 짧은 걸 골라요. 답은 확실하지만 순서의 수가 n!이라 한 곳 늘 때마다 대략 n배 느려져요. 그래서 앱에서는 안 쓰고, 다른 방법이 맞는 답을 내는지 확인하는 정답지로만 써요.
+- **Held-Karp 동적 계획법**: "A, B, C를 들렀고 지금 C에 있다"처럼 **상황이 같은 경로는 짧은 것 하나만 기억**해요. S→A→B→C와 S→B→A→C는 앞으로 갈 길이 똑같으니 긴 쪽은 버려요. 그래서 순서 전체(n!) 대신 "들른 곳 집합 × 지금 위치"(2ⁿ·n칸)만 채우면 돼요. 정확한 답을 주지만 2ⁿ으로 늘어서 ${EXACT_MAX}곳까지만 써요.
+  - 쿠폰 지점이 있으면 집합은 브랜드 단위로 체크하고, "지금 위치"는 실제 지점으로 둬요. 그래서 순서와 들를 지점을 한 번에 정해요.
+- **근사** (${EXACT_MAX + 1}곳 이상). 정답을 보장하지 않는 대신 빨라요. 아래 그래프의 ①②③이 이 단계들이에요.
+  - **① 가까운 곳부터 잇기**: 지금 위치에서 가장 가까운 안 간 곳으로 계속 가요. 빠르지만 10% 정도 길게 나와요.
+  - **② 꼬임 풀기 (2-opt)**: 동선에 X자로 엇갈린 두 선이 있으면 그 사이 구간을 뒤집어 풀어요. 엇갈린 선을 풀면 항상 짧아져요.
+  - **③ 옮겨 보기 (Or-opt)**: 1~3곳을 떼어 동선의 다른 자리에 끼워 보고, 짧아지면 옮겨요.
+  - **지점 다시 고르기**: 순서를 정해 둔 채로 브랜드마다 어느 지점이 가장 짧은지 다시 골라요. ②, ③과 이 단계를 더 줄지 않을 때까지 번갈아 해요.
+- **MST 하한**: 모든 장소를 선으로 잇는 가장 짧은 방법(최소 신장 트리)이에요. 한 줄로 잇는 동선도 "모두 이은 모양"의 하나라서 어떤 동선도 이보다 짧을 수 없어요. 정답을 구할 수 없는 큰 n에서 "근사가 최대 몇 % 길다"를 재는 바닥으로 써요.
 
 ### 실험
 
