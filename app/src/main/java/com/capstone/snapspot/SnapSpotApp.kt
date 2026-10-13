@@ -2,6 +2,7 @@ package com.capstone.snapspot
 
 import android.app.Application
 import android.content.Context
+import com.capstone.snapspot.core.fallbackBundleName
 import com.capstone.snapspot.data.FileBranchCache
 import com.capstone.snapspot.data.PendingStore
 import com.capstone.snapspot.data.RegionNames
@@ -30,7 +31,7 @@ class AppContainer(ctx: Context) {
     val regionNames = RegionNames(dir)
     /** Set by the home screen's lifecycle; read by [AlertService]. */
     @Volatile var onScreen = false
-    val alerts = AlertService(repo, AndroidNotifier(ctx), onScreen = { onScreen })
+    val alerts = AlertService(repo, AndroidNotifier(ctx), onScreen = { onScreen }, bundleName = { b -> regionNames.cached(b.center) ?: fallbackBundleName(b) })
     val geofenceSync = GeofenceSync(ctx, repo, kakao, branchCache)
     val location = LocationTracker(ctx)
 }

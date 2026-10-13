@@ -98,4 +98,54 @@ class AlertServiceTest {
         assertTrue(svc.onBranchEnter("b|${brandKey("스타벅스")}|1"))
         assertEquals(2, notifier.shown.size)
     }
+
+    private suspend fun seongsuBundle(repo: Repository, lastNotifiedC: Long? = null) {
+        repo.upsertPlace(place(id = "a", name = "어니언 성수", latitude = 37.5446, longitude = 127.0560))
+        repo.upsertPlace(place(id = "b", name = "로우키", latitude = 37.5450, longitude = 127.0565))
+        repo.upsertPlace(place(id = "c", name = "무비랜드", latitude = 37.5455, longitude = 127.0570, lastNotifiedAt = lastNotifiedC))
+        repo.upsertPlace(place(id = "z", name = "멀리", latitude = 37.60, longitude = 127.10))
+    }
+
+    @Test
+    fun `entering a bundle place sends one bundle alert and quiets the others`() = runTest {
+        val repo = Repository(dir)
+        val notifier = FakeNotifier()
+        val svc = AlertService(repo, notifier, bundleName = { "성수동" }) { NOW }
+        seongsuBundle(repo)
+        assertTrue(svc.onPlaceEnter("a"))
+        assertEquals(Triple("📍 성수동에 가 볼 곳 3곳이 있어요", "어니언 성수, 로우키 외 1곳", "snapspot://bundle/a"), notifier.shown.single())
+        assertTrue(repo.places.value.filter { it.id in setOf("a", "b", "c") }.all { it.lastNotifiedAt == NOW })
+        assertFalse(svc.onPlaceEnter("b"))
+        assertEquals(1, notifier.shown.size)
+    }
+
+    @Test
+    fun `a member alerted recently holds the bundle alert back`() = runTest {
+        val repo = Repository(dir)
+        val notifier = FakeNotifier()
+        val svc = AlertService(repo, notifier, bundleName = { "성수동" }) { NOW }
+        seongsuBundle(repo, lastNotifiedC = NOW - 60_000)
+        assertFalse(svc.onPlaceEnter("a"))
+        assertEquals(0, notifier.shown.size)
+    }
+
+    @Test
+    fun `a place outside any bundle still gets its own alert`() = runTest {
+        val repo = Repository(dir)
+        val notifier = FakeNotifier()
+        val svc = AlertService(repo, notifier, bundleName = { "성수동" }) { NOW }
+        seongsuBundle(repo)
+        assertTrue(svc.onPlaceEnter("z"))
+        assertEquals("snapspot://place/z", notifier.shown.single().third)
+    }
+
+    @Test
+    fun `bundle alerts stay quiet on screen`() = runTest {
+        val repo = Repository(dir)
+        val notifier = FakeNotifier()
+        val svc = AlertService(repo, notifier, onScreen = { true }, bundleName = { "성수동" }) { NOW }
+        seongsuBundle(repo)
+        assertFalse(svc.onPlaceEnter("a"))
+        assertEquals(0, notifier.shown.size)
+    }
 }
