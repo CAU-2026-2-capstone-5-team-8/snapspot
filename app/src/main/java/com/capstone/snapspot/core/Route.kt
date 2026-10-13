@@ -19,7 +19,7 @@ package com.capstone.snapspot.core
 import kotlin.math.ceil
 
 /** Up to this many stops the app solves exactly; above it, the heuristic. */
-const val EXACT_MAX = 10
+const val EXACT_MAX = 11
 
 /** Streets are not straight: walked distance ≈ straight distance × this. */
 const val DETOUR_FACTOR = 1.3

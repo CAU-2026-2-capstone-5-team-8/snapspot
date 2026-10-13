@@ -62,6 +62,15 @@ android {
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }
+            // ./gradlew :app:testDebugUnitTest -ProuteBench [-ProuteWrite]: route algorithm benchmark (docs/route.md).
+            if (project.hasProperty("routeBench")) {
+                it.filter.includeTestsMatching("*RouteBench*")
+                it.systemProperty("route.run", "true")
+                it.systemProperty("route.write", project.hasProperty("routeWrite").toString())
+                it.systemProperty("route.out", rootProject.file("docs/route.md").absolutePath)
+                it.testLogging.showStandardStreams = true
+                it.outputs.upToDateWhen { false }
+            }
         }
     }
 }

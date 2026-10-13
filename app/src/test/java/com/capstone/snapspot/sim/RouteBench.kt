@@ -1,0 +1,203 @@
+/**
+ * Route algorithm benchmark on real Seoul places (sim/seoul.json): how long each algorithm takes
+ * and how far the heuristic lands from the optimum, for n = 4…20 places in one neighborhood.
+ *
+ *   ./gradlew :app:testDebugUnitTest -ProuteBench               # prints the report
+ *   ./gradlew :app:testDebugUnitTest -ProuteBench -ProuteWrite  # also writes docs/route.md and its charts
+ */
+package com.capstone.snapspot.sim
+
+import com.capstone.snapspot.core.Coords
+import com.capstone.snapspot.core.EXACT_MAX
+import com.capstone.snapspot.core.bruteForceRoute
+import com.capstone.snapspot.core.exactRoute
+import com.capstone.snapspot.core.heuristicRoute
+import com.capstone.snapspot.core.Stop
+import com.capstone.snapspot.core.distanceMeters
+import com.capstone.snapspot.core.lowerBound
+import com.capstone.snapspot.core.stopsOf
+import kotlinx.serialization.json.Json
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.Test
+import java.io.File
+import java.util.Locale
+import kotlin.random.Random
+
+private const val REPEATS = 30
+private val NS = (4..20).toList()
+private const val BRUTE_MAX = 9
+private const val HELD_KARP_MAX = 16
+private const val BUDGET_MS = 50.0
+
+/** Phones run this several times slower than a desktop JVM; the cutoff keeps the phone under the budget. */
+private const val DEVICE_SLOWDOWN = 10.0
+
+private class Case(val points: List<Coords>, val start: Coords) {
+    val stops: List<Stop> get() = stopsOf(points)
+}
+
+private fun cases(n: Int): List<Case> {
+    val text = RouteBench::class.java.classLoader!!.getResource("sim/seoul.json")!!.readText()
+    val data = Json { ignoreUnknownKeys = true }.decodeFromString(SimData.serializer(), text)
+    val byHood = data.places.groupBy { it.hood }.values.toList()
+    val r = Random(20261013 + n)
+    return List(REPEATS) {
+        val hood = byHood[r.nextInt(byHood.size)]
+        val picked = hood.shuffled(r).take(n).map { Coords(it.lat, it.lng) }
+        val c = Coords(picked.map { it.latitude }.average(), picked.map { it.longitude }.average())
+        Case(picked, Coords(c.latitude + (r.nextDouble() - 0.5) * 0.004, c.longitude + (r.nextDouble() - 0.5) * 0.005))
+    }
+}
+
+/** Median wall time in ms of `f` over the cases, after warming the JIT on the first one. */
+private fun timeMs(cs: List<Case>, f: (Case) -> Unit): Double {
+    repeat(20) { f(cs[it % cs.size]) }
+    val times = cs.map { c -> val t = System.nanoTime(); f(c); (System.nanoTime() - t) / 1e6 }.sorted()
+    return times[times.size / 2]
+}
+
+class RouteBench {
+    @Test
+    fun bench() {
+        assumeTrue(System.getProperty("route.run") == "true", "run with ./gradlew :app:testDebugUnitTest -ProuteBench")
+        data class Row(val n: Int, val brute: Double?, val hk: Double?, val heur: Double, val gapNn: Double, val gap2: Double, val gapAll: Double, val vsMst: Boolean)
+        val rows = NS.map { n ->
+            val cs = cases(n)
+            val brute = if (n <= BRUTE_MAX) timeMs(cs) { bruteForceRoute(it.stops, it.start) } else null
+            val hk = if (n <= HELD_KARP_MAX) timeMs(cs) { exactRoute(it.stops, it.start) } else null
+            val heur = timeMs(cs) { heuristicRoute(it.stops, it.start) }
+            // Gap against the optimum when Held-Karp can give it (n ≤ 12), else against the MST lower bound (an upper bound on the gap).
+            // Against the optimum while Held-Karp can give it; above that against the MST lower bound (an upper bound on the gap).
+            val vsMst = n > HELD_KARP_MAX
+            val refs = cs.map { c -> if (vsMst) lowerBound(c.stops, c.start) else exactRoute(c.stops, c.start).meters }
+            fun gap(f: (Case) -> Double) = cs.indices.map { i ->
+                val c = cs[i]
+                val ref = refs[i]
+                100 * (f(c) / ref - 1)
+            }.average()
+            Row(
+                n, brute, hk, heur,
+                gap { heuristicRoute(it.stops, it.start, twoOpt = false, orOpt = false).meters },
+                gap { heuristicRoute(it.stops, it.start, twoOpt = true, orOpt = false).meters },
+                gap { heuristicRoute(it.stops, it.start).meters },
+                vsMst,
+            )
+        }
+        val coupons = couponExperiment()
+        val cutoff = rows.filter { it.hk != null && it.hk * DEVICE_SLOWDOWN <= BUDGET_MS }.maxOf { it.n }
+        fun ms(v: Double?) = v?.let { String.format(Locale.US, if (it < 1) "%.3f" else "%.1f", it) } ?: "–"
+        fun pc(v: Double) = String.format(Locale.US, "%.1f%%", v)
+        val table = buildString {
+            appendLine("| 장소 수 n | 완전 탐색 (ms) | Held-Karp (ms) | 근사 (ms) | 가까운 곳부터 잇기 | + 2-opt | + Or-opt | 비교 기준 |")
+            appendLine("|---|---|---|---|---|---|---|---|")
+            for (r in rows) appendLine("| ${r.n} | ${ms(r.brute)} | ${ms(r.hk)} | ${ms(r.heur)} | ${pc(r.gapNn)} | ${pc(r.gap2)} | ${pc(r.gapAll)} | ${if (r.vsMst) "MST 하한" else "최적 (Held-Karp)"} |")
+        }
+        val timeChart = lineChart(
+            title = "장소 수별 실행 시간 (중앙값, 로그 축)", xLabel = "장소 수 n", xs = NS.map { "$it" }, yLabel = "ms",
+            series = listOf(
+                Series("완전 탐색", 0, rows.filter { it.brute != null }.map { it.brute!! }),
+                Series("Held-Karp", 1, rows.filter { it.hk != null }.map { it.hk!! }),
+                Series("근사", 2, rows.map { it.heur }),
+            ), percent = false, logY = true, palette = Palette.CATEGORICAL,
+        )
+        val gapChart = lineChart(
+            title = "근사의 최적 대비 거리 차이 (Held-Karp 최적해 기준)", xLabel = "장소 수 n", xs = NS.filter { it <= HELD_KARP_MAX }.map { "$it" }, yLabel = "%",
+            series = listOf(
+                Series("가까운 곳부터 잇기", 0, rows.filter { !it.vsMst }.map { it.gapNn }),
+                Series("+ 2-opt", 1, rows.filter { !it.vsMst }.map { it.gap2 }),
+                Series("+ Or-opt", 2, rows.filter { !it.vsMst }.map { it.gapAll }),
+            ),
+        )
+        val md = routeDoc(table, cutoff, coupons)
+        println(md)
+        if (System.getProperty("route.write") == "true") {
+            val out = File(requireNotNull(System.getProperty("route.out")))
+            out.writeText(md)
+            val dir = File(out.parentFile, "route").apply { mkdirs() }
+            File(dir, "time.svg").writeText(timeChart)
+            File(dir, "gap.svg").writeText(gapChart)
+        }
+        println("cutoff (Held-Karp × $DEVICE_SLOWDOWN ≤ ${BUDGET_MS}ms): n = $cutoff; app uses EXACT_MAX = $EXACT_MAX")
+    }
+}
+
+/**
+ * Coupon stops: 5–8 places in one neighborhood plus 1–2 brands whose real branches lie within 500m
+ * of a place (up to 8 per brand). Naive = take each brand's branch nearest the places' center, then
+ * solve the plain route; GTSP = let the exact route pick the branch. Returns the markdown table.
+ */
+private fun couponExperiment(): String {
+    val text = RouteBench::class.java.classLoader!!.getResource("sim/seoul.json")!!.readText()
+    val data = Json { ignoreUnknownKeys = true }.decodeFromString(SimData.serializer(), text)
+    val byHood = data.places.groupBy { it.hood }.values.toList()
+    val brands = SIM_BRANDS.map { (_, key) -> data.branches.getValue(key).map { Coords(it.lat, it.lng) } }
+    val r = Random(20261014)
+    data class Trial(val saving: Double, val naiveMs: Double, val gtspMs: Double, val brands: Int)
+    val trials = mutableListOf<Trial>()
+    while (trials.size < 60) {
+        val places = byHood[r.nextInt(byHood.size)].shuffled(r).take(5 + r.nextInt(4)).map { Coords(it.lat, it.lng) }
+        val center = Coords(places.map { it.latitude }.average(), places.map { it.longitude }.average())
+        val nearBrands = brands.map { b -> b.filter { br -> places.any { distanceMeters(it, br) <= 500 } }.sortedBy { distanceMeters(center, it) }.take(8) }
+            .filter { it.size >= 2 }.shuffled(r).take(1 + r.nextInt(2))
+        if (nearBrands.isEmpty()) continue
+        val start = Coords(center.latitude + (r.nextDouble() - 0.5) * 0.004, center.longitude + (r.nextDouble() - 0.5) * 0.005)
+        var naive = 0.0
+        var t = System.nanoTime()
+        naive = exactRoute(stopsOf(places + nearBrands.map { it.first() }), start).meters
+        val naiveMs = (System.nanoTime() - t) / 1e6
+        t = System.nanoTime()
+        val gtsp = exactRoute(stopsOf(places) + nearBrands, start).meters
+        val gtspMs = (System.nanoTime() - t) / 1e6
+        trials += Trial(100 * (1 - gtsp / naive), naiveMs, gtspMs, nearBrands.size)
+    }
+    fun f(v: Double) = String.format(Locale.US, "%.1f", v)
+    return buildString {
+        appendLine("| 쿠폰 브랜드 수 | 경우 | 지점 선택 최적화로 줄어든 거리 (평균) | 최대 | 단순 방법 (ms, 중앙값) | 지점 선택 최적화 (ms, 중앙값) |")
+        appendLine("|---|---|---|---|---|---|")
+        for ((k, ts) in trials.groupBy { it.brands }.toSortedMap()) {
+            appendLine("| $k | ${ts.size} | ${f(ts.map { it.saving }.average())}% | ${f(ts.maxOf { it.saving })}% | ${f(ts.map { it.naiveMs }.sorted()[ts.size / 2])} | ${f(ts.map { it.gtspMs }.sorted()[ts.size / 2])} |")
+        }
+    }
+}
+
+private fun routeDoc(table: String, cutoff: Int, coupons: String) = """## 동네 묶음 최단 경로
+
+동네 묶음의 걷기 동선은 **출발점이 있고 돌아오지 않는 외판원 문제(Open-path TSP)**예요. 모든 장소를 한 번씩 들르는 가장 짧은 순서를 찾아요.
+
+`./gradlew :app:testDebugUnitTest -ProuteBench -ProuteWrite`로 다시 만들 수 있어요 (시드 고정).
+
+### 알고리즘
+
+| 방법 | 시간 복잡도 (g = 들를 곳 수, N = 후보 수) | 정확도 | 앱에서 쓰는 곳 |
+|---|---|---|---|
+| 완전 탐색 | O(g!·∏kᵢ) | 최적 | 테스트에서 정답 확인용 |
+| **Held-Karp 동적 계획법** | O(2^g·N²), 메모리 O(2^g·N) (쿠폰 없으면 O(n²·2ⁿ)) | 최적 | 들를 곳 ${EXACT_MAX}곳 이하 |
+| **가까운 곳부터 잇기 + 2-opt + Or-opt + 지점 다시 고르기** | 한 바퀴 O(g³ + Σkᵢkᵢ₊₁) (구현), 몇 바퀴 반복 | 근사 | ${EXACT_MAX + 1}곳 이상 |
+| 최소 신장 트리(MST, Prim) | O(g²·k²) | 하한 | 근사의 오차 상한 계산 |
+
+- **Held-Karp**: "지금까지 방문한 장소 집합(비트마스크)과 마지막 장소"를 상태로 두고, 각 상태까지의 최단 거리를 작은 집합부터 채워요. 출발점이 없으면 모든 장소를 출발 상태로 둬요.
+- **2-opt**: 경로의 한 구간을 뒤집어 엇갈린 두 선을 풀어요. **Or-opt**: 1~3곳을 떼어 다른 자리에 끼워 넣어요. 둘 다 더 줄지 않을 때까지 반복해요.
+- **MST 하한**: 최소 신장 트리는 어떤 열린 경로보다도 짧거나 같아서, 정답을 모르는 큰 n에서도 "근사가 최적보다 최대 몇 % 길다"를 보장할 수 있어요.
+
+### 실험
+
+- 데이터: 실제 서울 8개 동네의 장소 160곳(`sim/seoul.json`). 동네 하나에서 n곳을 무작위로 뽑고, 출발점은 그 장소들 중심 근처의 임의 위치. n마다 ${REPEATS}번.
+- 시간: JVM 예열 후 중앙값. 완전 탐색은 n ≤ $BRUTE_MAX, Held-Karp는 n ≤ ${HELD_KARP_MAX}까지.
+- 거리 차이: n ≤ ${HELD_KARP_MAX}는 Held-Karp 최적해와 비교한 평균. 그보다 크면 MST 하한과 비교한 값이라 실제 차이보다 큰 **상한**이에요(MST 하한은 최적보다 보통 15~20% 짧아요).
+
+![장소 수별 실행 시간](route/time.svg)
+![근사의 최적 대비 거리 차이](route/gap.svg)
+
+$table
+### 쿠폰 쓸 곳 포함: 지점 고르기
+
+"쿠폰 쓸 곳 포함"을 켜면 쿠폰 브랜드마다 근처 지점 중 **한 곳만** 들르면 돼요. 이건 무리마다 한 곳을 고르는 **일반화 외판원 문제(Generalized TSP)**예요. Held-Karp의 상태를 (들른 무리 집합, 마지막으로 들른 지점)으로 넓혀 O(2^g·N²)에 정확히 풀어요(g = 무리 수, N = 전체 후보 수).
+
+비교: 브랜드마다 장소들 중심에서 가장 가까운 지점을 미리 고르는 **단순 방법** 대 **지점 선택 최적화**. 동네에서 장소 5~8곳과 실제 지점(장소에서 500m 안, 브랜드마다 최대 8곳)을 60번 뽑았어요.
+
+$coupons
+### 결론
+
+- 폰은 이 측정(데스크톱 JVM)보다 최대 ${DEVICE_SLOWDOWN.toInt()}배 느리다고 보고, 폰에서도 ${BUDGET_MS.toInt()}ms 안에 끝나도록 Held-Karp가 ${(BUDGET_MS / DEVICE_SLOWDOWN).toInt()}ms 안에 끝나는 가장 큰 n을 봤어요. 이번 측정에서는 **$cutoff**이에요. 시간 측정은 실행마다 조금씩 흔들려 이 값이 11~12를 오가서, 앱의 전환 기준 `EXACT_MAX`는 작은 쪽인 ${EXACT_MAX}로 정했어요.
+- 한 동네에 저장하는 장소는 보통 10곳 이하라, 대부분의 묶음은 정확한 최단 경로를 받아요.
+"""
