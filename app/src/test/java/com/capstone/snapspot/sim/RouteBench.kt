@@ -92,21 +92,28 @@ class RouteBench {
             appendLine("|---|---|---|---|---|---|---|---|")
             for (r in rows) appendLine("| ${r.n} | ${ms(r.brute)} | ${ms(r.hk)} | ${ms(r.heur)} | ${pc(r.gapNn)} | ${pc(r.gap2)} | ${pc(r.gapAll)} | ${if (r.vsMst) "MST 하한" else "최적 (Held-Karp)"} |")
         }
+        // Both charts mark where the app switches from the exact route to the heuristic.
+        val switchAt = NS.indexOf(EXACT_MAX)
         val timeChart = lineChart(
-            title = "장소 수별 실행 시간 (중앙값, 로그 축)", xLabel = "장소 수 n", xs = NS.map { "$it" }, yLabel = "ms",
+            title = "장소 수별 계산 시간 (PC 측정, 중앙값)", xLabel = "장소 수 n", xs = NS.map { "$it" }, yLabel = "ms",
+            subtitle = "세로축 한 칸 = 10배 (로그 눈금). 1ms 아래의 엇갈림은 측정 잡음이에요",
             series = listOf(
-                Series("완전 탐색", 0, rows.filter { it.brute != null }.map { it.brute!! }),
+                Series("완전 탐색", 0, rows.filter { it.brute != null }.map { it.brute!! }, label = "완전 탐색 (${BRUTE_MAX}곳까지만 측정)", labelAbove = true),
                 Series("Held-Karp", 1, rows.filter { it.hk != null }.map { it.hk!! }),
                 Series("근사", 2, rows.map { it.heur }),
             ), percent = false, logY = true, palette = Palette.CATEGORICAL,
+            refLine = RefLine(BUDGET_MS / DEVICE_SLOWDOWN, "PC ${(BUDGET_MS / DEVICE_SLOWDOWN).toInt()}ms = 폰 ${BUDGET_MS.toInt()}ms 한도"),
+            split = Split(switchAt, "앱: ${EXACT_MAX}곳까지 Held-Karp", "${EXACT_MAX + 1}곳부터 근사"),
         )
         val gapChart = lineChart(
-            title = "근사의 최적 대비 거리 차이 (Held-Karp 최적해 기준)", xLabel = "장소 수 n", xs = NS.filter { it <= HELD_KARP_MAX }.map { "$it" }, yLabel = "%",
+            title = "근사 경로가 정답보다 몇 % 긴가 (정답 = Held-Karp)", xLabel = "장소 수 n", xs = NS.filter { it <= HELD_KARP_MAX }.map { "$it" }, yLabel = "%",
+            subtitle = "단계를 하나씩 더해요. ②는 2-opt, ③은 Or-opt이고, 앱의 근사는 ③까지 해요",
             series = listOf(
-                Series("가까운 곳부터 잇기", 0, rows.filter { !it.vsMst }.map { it.gapNn }),
-                Series("+ 2-opt", 1, rows.filter { !it.vsMst }.map { it.gap2 }),
-                Series("+ Or-opt", 2, rows.filter { !it.vsMst }.map { it.gapAll }),
+                Series("① 가까운 곳부터 잇기", 0, rows.filter { !it.vsMst }.map { it.gapNn }),
+                Series("② + 꼬임 풀기", 1, rows.filter { !it.vsMst }.map { it.gap2 }),
+                Series("③ + 옮겨 보기", 2, rows.filter { !it.vsMst }.map { it.gapAll }),
             ),
+            split = Split(switchAt, "앱은 정답 사용", "근사 사용"),
         )
         val md = routeDoc(table, cutoff, coupons)
         println(md)
