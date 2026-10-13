@@ -1,54 +1,26 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# dependencies
-node_modules/
-
-# Expo
-.expo/
-dist/
-web-build/
-expo-env.d.ts
-
-# Native
-.kotlin/
-*.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
-*.pem
-
-# local env files
-.env*.local
-
-# typescript
-*.tsbuildinfo
-
-# generated native folders
-/ios
-/android
-
-# secrets
-.env
-/android
-
 # Kotlin/Gradle
 .gradle/
 /build
 /app/build
-local.properties
 .kotlin/
 .idea/
 *.iml
+captures/
+
+# Secrets: API keys live in local.properties (see local.properties.example)
+local.properties
+.env
+*.jks
+*.keystore
+*.p12
+*.key
+*.pem
+
+# Leftovers from the old Expo app in existing checkouts
+node_modules/
+.expo/
+/android
+/ios
+
+# macOS
+.DS_Store
