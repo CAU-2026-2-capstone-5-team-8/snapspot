@@ -51,8 +51,6 @@
 - **이동**: 가상 사용자 40명이 동네 사이는 버스로, 동네 안은 걸어서 다녀요. 1인당 5번씩, 시드 3개로 반복해서 모두 600번, 약 13,800km를 다녔어요.
 - 전체 표와 가정은 [docs/simulation.md](docs/simulation.md)에 있어요.
 
-<p><img src="docs/sim/refresh.svg" width="480" alt="갱신 반경별 지점 방문을 잡은 비율. 500m 80%, 1000m 64%, 2000m 44% (90칸)" /></p>
-
 | 전략 (저장한 장소 30곳) | 저장한 장소 | 쿠폰 알림 (지점을 지난 외출 중) | km당 갱신 횟수 |
 |---|---|---|---|
 | 고정: 출발할 때 가까운 90곳만 등록 | 100.0% | 56.2% | 0.04 |
@@ -60,9 +58,27 @@
 | 움직이는 창: 90칸, 갱신 1km, 갱신이 5분 늦을 때 | 100.0% | 99.9% | 0.36 |
 
 - **저장한 장소**는 모든 설정에서 놓친 방문이 없어요. 장소가 우선순위 1순위라 가까운 순으로 먼저 칸을 차지해요.
-- **갱신 반경**을 좁히면 지점 하나하나를 더 잘 잡지만 더 자주 갱신해요. 쿠폰은 어느 지점이든 한 번 울리면 되니 1km로 골랐어요.
 - **iOS 한도(20칸)**에서는 저장한 장소가 30곳을 넘으면 장소가 칸을 다 차지해서 쿠폰 알림이 0%가 돼요(10곳일 때는 99.7%). iOS로 넓힐 때는 쿠폰 몫 칸을 남겨 둬야 해요.
 - 지금 설정에서 울리는 알림의 약 63%는 버스로 지나가며 울리는 알림이에요. 이 알림은 미뤘다가 근처에서 내려 걸을 때만 울려요.
+
+### 갱신 반경은 왜 1km인가
+
+갱신 반경이 작으면 등록된 지점이 늘 지금 위치 근처라 놓치지 않지만 자주 갱신해요. 크면 갱신은 드물지만, 멀어진 뒤에는 "아까 자리 근처" 지점만 등록돼 있어서 지금 지나가는 지점을 놓쳐요.
+
+지점 50곳을 원 안에 고르게 뿌리고(위도·경도만), 가상 사용자 1,500명이 그 안을 걷게 해서 반경별로 비교했어요. 원 크기를 바꿔 밀도를 서울 번화가(km²당 15.9곳), 메가커피 서울 평균(1.8곳), 올리브영 서울 평균(0.6곳) 세 가지로 봤어요. 자세한 설정과 전체 표는 [docs/refresh-radius.md](docs/refresh-radius.md)에 있어요.
+
+<p><img src="docs/sim/uniform-missed.svg" width="480" alt="처음 지나간 지점을 놓친 비율. 1km까지는 세 밀도 모두 1.3% 이하, 서울 평균 밀도에서 1.5km 5.7%, 2km 10.3%, 3km 12.9%" /></p>
+
+| 갱신 반경 (서울 평균 밀도, 갱신 지연 2분) | 처음 지나간 지점에서 알림 | km당 갱신 횟수 |
+|---|---|---|
+| 500m | 100.0% | 1.36 |
+| **1km** (지금 설정) | **99.1%** | **0.68** |
+| 1.5km | 94.3% | 0.44 |
+| 2km | 89.7% | 0.35 |
+
+- **1km까지는 알림을 거의 잃지 않아요.** 그러면서 갱신은 500m의 절반이에요.
+- **1km를 넘으면 처음 지나간 지점을 놓치는 경우가 빠르게 늘어요.** 2km면 열 번에 한 번꼴이에요.
+- 번화가(98.7%)와 지점이 드문 곳(99.9%)에서도 1km는 알림을 잃지 않아요. 앱은 사용자 주변 밀도를 미리 알 수 없어서, **어느 밀도에서도 안전한 가장 큰 값**으로 1km를 골랐어요.
 
 ### 실제 동작 확인 (에뮬레이터, 2026-10-13)
 
@@ -173,9 +189,10 @@ app/src/main/java/com/capstone/snapspot/
   notify/               알림 채널 · 발송 · 쿨다운
   ui/                   Compose 화면 (home, add, coupon, status, map, theme)
 
-app/src/test/           단위 테스트 (JUnit 5) + 시뮬레이터 sim/SimulateWindow.kt
+app/src/test/           단위 테스트 (JUnit 5) + 시뮬레이터 sim/SimulateWindow.kt, sim/UniformBranches.kt
 eval/                   정답 달린 스크린샷 (장소 매칭 정확도 측정용)
-docs/simulation.md      지오펜스 전략 시뮬레이션 결과
+docs/simulation.md      지오펜스 전략 시뮬레이션 결과 (실제 서울 데이터)
+docs/refresh-radius.md  갱신 반경을 1km로 고른 근거 (지점을 고르게 뿌린 통제 실험)
 ```
 
 ## 실행 방법
@@ -218,8 +235,9 @@ Android Studio로 프로젝트를 열고 실행하거나, 명령줄에서:
 ## 테스트와 측정
 
 ```bash
-./gradlew testDebugUnitTest                              # 단위 테스트 79개
-./gradlew :app:testDebugUnitTest -Psim -PsimWrite        # 지오펜스 전략 시뮬레이션 → docs/simulation.md
+./gradlew testDebugUnitTest                                   # 단위 테스트 132개 (측정용 4개는 건너뜀)
+./gradlew :app:testDebugUnitTest -Psim -PsimWrite             # 지오펜스 전략 시뮬레이션 → docs/simulation.md
+./gradlew :app:testDebugUnitTest -PuniformSim -PuniformWrite  # 갱신 반경 통제 실험 → docs/refresh-radius.md
 ```
 
 GitHub Actions가 push와 PR마다 단위 테스트와 디버그 빌드를 돌려요(`.github/workflows/android.yml`).
