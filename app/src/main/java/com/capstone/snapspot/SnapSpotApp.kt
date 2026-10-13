@@ -2,8 +2,10 @@ package com.capstone.snapspot
 
 import android.app.Application
 import android.content.Context
+import com.capstone.snapspot.core.fallbackBundleName
 import com.capstone.snapspot.data.FileBranchCache
 import com.capstone.snapspot.data.PendingStore
+import com.capstone.snapspot.data.RegionNames
 import com.capstone.snapspot.data.Repository
 import com.capstone.snapspot.geofence.GeofenceSync
 import com.capstone.snapspot.location.LocationTracker
@@ -26,9 +28,10 @@ class AppContainer(ctx: Context) {
     val gemini = GeminiClient(BuildConfig.GEMINI_API_KEY, BuildConfig.GEMINI_MODEL.ifEmpty { "gemini-3.5-flash-lite" }, http)
     val branchCache = FileBranchCache(dir)
     val pending = PendingStore(dir)
+    val regionNames = RegionNames(dir)
     /** Set by the home screen's lifecycle; read by [AlertService]. */
     @Volatile var onScreen = false
-    val alerts = AlertService(repo, AndroidNotifier(ctx), onScreen = { onScreen })
+    val alerts = AlertService(repo, AndroidNotifier(ctx), onScreen = { onScreen }, bundleName = { b -> regionNames.cached(b.center) ?: fallbackBundleName(b) })
     val geofenceSync = GeofenceSync(ctx, repo, kakao, branchCache)
     val location = LocationTracker(ctx)
 }

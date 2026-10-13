@@ -47,11 +47,12 @@ import com.kakao.vectormap.label.LabelStyles
 import com.kakao.vectormap.shape.MapPoints
 import com.kakao.vectormap.shape.PolygonOptions
 import com.kakao.vectormap.shape.PolygonStyles
+import com.kakao.vectormap.shape.PolylineOptions
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** A saved place: pin plus its alert radius. */
-data class MapPlace(val id: String, val at: Coords, val radiusM: Double, val initial: String, val ended: Boolean, val selected: Boolean)
+/** A saved place: pin plus its alert radius (none when 0). `number`: position in an open bundle's route, shown instead of the initial. */
+data class MapPlace(val id: String, val at: Coords, val radiusM: Double, val initial: String, val ended: Boolean, val selected: Boolean, val number: Int? = null)
 
 /** A registered franchise branch: a small dot, no radius. */
 data class MapBranch(val id: String, val at: Coords, val initial: String, val urgent: Boolean, val near: Boolean)
@@ -77,6 +78,8 @@ fun SpotMap(
     cornerRadius: Dp = 24.dp,
     maskColor: Color = SnapColors.paper,
     interactive: Boolean = true,
+    /** An open bundle's walking route, drawn as a line through these points in order. */
+    route: List<Coords> = emptyList(),
     onPinClick: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
@@ -135,9 +138,9 @@ fun SpotMap(
         }
     }
 
-    LaunchedEffect(map, places, branches, here, refresh) {
+    LaunchedEffect(map, places, branches, here, refresh, route) {
         val m = map ?: return@LaunchedEffect
-        draw(m, places, branches, here, refresh, density)
+        draw(m, places, branches, here, refresh, route, density)
     }
     LaunchedEffect(map, interactive) {
         val m = map ?: return@LaunchedEffect
@@ -186,7 +189,7 @@ private fun circle(center: Coords, radiusM: Double): MapPoints {
 
 private fun withAlpha(c: Color, a: Float) = c.copy(alpha = a).toArgb()
 
-private fun draw(m: KakaoMap, places: List<MapPlace>, branches: List<MapBranch>, here: Coords?, refresh: Pair<Coords, Double>?, density: Float) {
+private fun draw(m: KakaoMap, places: List<MapPlace>, branches: List<MapBranch>, here: Coords?, refresh: Pair<Coords, Double>?, route: List<Coords>, density: Float) {
     val shapes = m.shapeManager?.layer ?: return
     val labels = m.labelManager?.layer ?: return
     shapes.removeAll()
@@ -196,10 +199,14 @@ private fun draw(m: KakaoMap, places: List<MapPlace>, branches: List<MapBranch>,
         shapes.addPolygon(PolygonOptions.from(circle(c, r), PolygonStyles.from(withAlpha(SnapColors.highlight, 0.10f), 2f * density, withAlpha(SnapColors.amber, 0.6f))))
     }
     for (p in places) {
+        if (p.radiusM <= 0) continue
         val tone = if (p.ended) SnapColors.muted else SnapColors.green
         shapes.addPolygon(
             PolygonOptions.from(circle(p.at, p.radiusM), PolygonStyles.from(withAlpha(tone, if (p.selected) 0.25f else 0.15f), 1.5f * density, withAlpha(tone, 0.9f))),
         )
+    }
+    if (route.size >= 2) {
+        shapes.addPolyline(PolylineOptions.from(MapPoints.fromLatLng(route.map { latLng(it) }), 3f * density, SnapColors.ink.toArgb()))
     }
     for (b in branches) {
         val fill = if (b.near) SnapColors.highlight else SnapColors.surface
@@ -209,7 +216,7 @@ private fun draw(m: KakaoMap, places: List<MapPlace>, branches: List<MapBranch>,
     }
     for (p in places) {
         val fill = if (p.ended) SnapColors.muted else SnapColors.green
-        val bmp = badge(p.initial, fill.toArgb(), SnapColors.surface.toArgb(), SnapColors.surface.toArgb(), if (p.selected) 34 else 28, 3f, density)
+        val bmp = badge(p.number?.toString() ?: p.initial, fill.toArgb(), SnapColors.surface.toArgb(), SnapColors.surface.toArgb(), if (p.selected) 34 else 28, 3f, density)
         labels.addLabel(
             LabelOptions.from(p.id, latLng(p.at)).setStyles(LabelStyles.from(LabelStyle.from(bmp).setAnchorPoint(0.5f, 0.5f)))
                 .setTag(p.id).setClickable(true).setRank(if (p.selected) 10 else 5),

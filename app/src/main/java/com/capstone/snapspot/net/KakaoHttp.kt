@@ -1,6 +1,7 @@
 package com.capstone.snapspot.net
 
 import com.capstone.snapspot.core.AddressDoc
+import com.capstone.snapspot.core.Coords
 import com.capstone.snapspot.core.KakaoApi
 import com.capstone.snapspot.core.KakaoDoc
 import com.capstone.snapspot.core.KakaoException
@@ -25,6 +26,26 @@ class KakaoHttp(
 
     override suspend fun address(query: String): List<AddressDoc> =
         get("address", mapOf("query" to query, "size" to "1"), AddressDoc.serializer())
+
+    @Suppress("PropertyName")
+    @Serializable
+    private data class Region(val region_type: String = "", val region_3depth_name: String = "")
+
+    /** Administrative dong ("성수2가1동") at a point, or null. */
+    suspend fun regionName(at: Coords): String? {
+        if (key.isEmpty()) return null
+        val url = "${base.substringBeforeLast("/search")}/geo/coord2regioncode.json".toHttpUrl().newBuilder()
+            .addQueryParameter("x", at.longitude.toString())
+            .addQueryParameter("y", at.latitude.toString())
+            .build()
+        val req = Request.Builder().url(url).header("Authorization", "KakaoAK $key").build()
+        client.newCall(req).await().use { res ->
+            val body = res.body?.string().orEmpty()
+            if (!res.isSuccessful) throw KakaoException("카카오 행정동 조회 실패 (${res.code}): ${body.take(200)}")
+            return json.decodeFromString(Page.serializer(Region.serializer()), body).documents
+                .firstOrNull { it.region_type == "H" }?.region_3depth_name?.takeIf { it.isNotBlank() }
+        }
+    }
 
     private suspend fun <T> get(path: String, params: Map<String, String>, item: KSerializer<T>): List<T> {
         if (key.isEmpty()) throw KakaoException("카카오 REST API 키가 없어요. local.properties의 KAKAO_REST_KEY를 설정하세요.")

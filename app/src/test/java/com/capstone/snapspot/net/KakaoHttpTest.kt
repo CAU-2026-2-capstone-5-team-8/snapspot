@@ -56,4 +56,17 @@ class KakaoHttpTest {
         val e = assertThrows<KakaoException> { kakao.keyword(mapOf("query" to "x")) }
         assertTrue(e.message!!.startsWith("카카오 검색 실패 (401):"), e.message)
     }
+
+    @Test
+    fun `region name is the administrative dong`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"documents":[{"region_type":"B","region_3depth_name":"성수동2가"},{"region_type":"H","region_3depth_name":"성수2가1동"}]}""",
+            ),
+        )
+        assertEquals("성수2가1동", kakao.regionName(com.capstone.snapspot.core.Coords(37.5446, 127.056)))
+        val req = server.takeRequest()
+        assertTrue(req.path!!.startsWith("/v2/local/geo/coord2regioncode.json"))
+        assertTrue(req.path!!.contains("x=127.056") && req.path!!.contains("y=37.5446"))
+    }
 }

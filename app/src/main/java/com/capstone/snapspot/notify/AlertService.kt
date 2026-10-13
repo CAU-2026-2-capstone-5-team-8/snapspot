@@ -1,9 +1,14 @@
 package com.capstone.snapspot.notify
 
+import com.capstone.snapspot.core.Bundle
+import com.capstone.snapspot.core.PLACE_COOLDOWN_MS
 import com.capstone.snapspot.core.brandCoolingDown
+import com.capstone.snapspot.core.bundleAlertText
+import com.capstone.snapspot.core.bundleOf
 import com.capstone.snapspot.core.brandKeyOfRegion
 import com.capstone.snapspot.core.couponAlertText
 import com.capstone.snapspot.core.couponsForBrand
+import com.capstone.snapspot.core.fallbackBundleName
 import com.capstone.snapspot.core.placeAlertText
 import com.capstone.snapspot.core.suppressReason
 import com.capstone.snapspot.data.Repository
@@ -26,14 +31,26 @@ class AlertService(
     private val notifier: Notifier,
     /** True while the app is on screen: its own "지금 근처예요" marks do the job, no notification. */
     private val onScreen: () -> Boolean = { false },
+    /** Display name of a bundle's neighborhood; must not block (cache only). */
+    private val bundleName: (Bundle) -> String = ::fallbackBundleName,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val lock = Mutex()
 
     suspend fun onPlaceEnter(placeId: String, force: Boolean = false): Boolean = lock.withLock {
         if (!force && onScreen()) return@withLock false
-        val place = repo.places.value.firstOrNull { it.id == placeId } ?: return@withLock false
+        val places = repo.places.value
+        val place = places.firstOrNull { it.id == placeId } ?: return@withLock false
         val now = clock()
+        val bundle = bundleOf(places, placeId, now)
+        if (bundle != null && !force) {
+            // One alert per neighborhood walk: any member alerted recently holds it back.
+            if (bundle.places.any { p -> p.lastNotifiedAt?.let { now - it < PLACE_COOLDOWN_MS } == true }) return@withLock false
+            val (title, body) = bundleAlertText(bundleName(bundle), bundle, placeId)
+            notifier.show(bundle.id.hashCode(), title, body, "snapspot://bundle/$placeId")
+            for (p in bundle.places) repo.markPlaceNotified(p.id, now)
+            return@withLock true
+        }
         if (!force && suppressReason(place, now) != null) return@withLock false
         val (title, body) = placeAlertText(place)
         notifier.show(place.id.hashCode(), title, body, "snapspot://place/${place.id}")
