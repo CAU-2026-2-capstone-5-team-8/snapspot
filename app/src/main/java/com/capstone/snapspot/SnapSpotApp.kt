@@ -33,10 +33,15 @@ class SnapSpotApp : Application() {
     lateinit var container: AppContainer
         private set
 
+    /** False when the map SDK could not start (no native key, or no native library for this CPU). */
+    var mapReady = false
+        private set
+
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
         ensureChannel(this)
-        if (BuildConfig.KAKAO_NATIVE_KEY.isNotEmpty()) KakaoMapSdk.init(this, BuildConfig.KAKAO_NATIVE_KEY)
+        mapReady = BuildConfig.KAKAO_NATIVE_KEY.isNotEmpty() &&
+            runCatching { KakaoMapSdk.init(this, BuildConfig.KAKAO_NATIVE_KEY) }.isSuccess
     }
 }
