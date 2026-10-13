@@ -20,10 +20,20 @@ import kotlin.math.pow
  * `labelBefore`: put that label left of the last point, ending there (for a line that stops mid-plot and would
  * otherwise label across the lines to its right).
  */
-class Series(val name: String, val shade: Int, val values: List<Double>, val label: String? = null, val labelBefore: Boolean = false)
+class Series(
+    val name: String,
+    val shade: Int,
+    val values: List<Double>,
+    val label: String? = null,
+    val labelBefore: Boolean = false,
+    /** Estimated values for the x positions after `values`, drawn dashed with hollow markers. */
+    val estimate: List<Double> = emptyList(),
+) {
+    val points: List<Double> get() = values + estimate
+}
 
-/** A dashed horizontal guide at `value` (a threshold), labeled at the plot's right edge. */
-class RefLine(val value: Double, val label: String)
+/** A dashed horizontal guide at `value` (a threshold), labeled at the plot's right edge (or left, `atStart`). */
+class RefLine(val value: Double, val label: String, val atStart: Boolean = false)
 
 /** A dashed vertical divider between x index `after` and `after + 1`, with a label on each side. */
 class Split(val after: Int, val left: String, val right: String)
@@ -44,7 +54,7 @@ private const val BOTTOM = 52
 private fun textW(s: String) = s.sumOf { if (it.code < 128) 7.0 else 12.5 }
 
 private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-private fun num(v: Double, percent: Boolean) = when {
+private fun plainNum(v: Double, percent: Boolean) = when {
     percent -> String.format(Locale.US, "%.1f%%", v)
     v >= 10 -> String.format(Locale.US, "%.0f", v)
     v >= 0.1 -> String.format(Locale.US, "%.2f", v)
@@ -67,8 +77,11 @@ fun lineChart(
     subtitle: String? = null,
     refLine: RefLine? = null,
     split: Split? = null,
+    /** Formats values (ticks on a log axis, end labels, tooltips) instead of plain numbers, e.g. as durations. */
+    format: ((Double) -> String)? = null,
 ): String {
-    val all = series.flatMap { it.values }
+    val all = series.flatMap { it.points }
+    fun num(v: Double, percent: Boolean) = format?.invoke(v) ?: plainNum(v, percent)
     if (logY) require(all.all { it > 0 }) { "log axis needs positive values" }
     fun tr(v: Double) = if (logY) log10(v) else v
     val step: Double
@@ -87,9 +100,9 @@ fun lineChart(
         if (percent) { lo = lo.coerceAtLeast(0.0); hi = hi.coerceAtMost(100.0) }
     }
     if (hi <= lo) hi = lo + step
-    fun endLabel(s: Series) = s.label ?: "${s.name} ${num(s.values.last(), percent)}"
+    fun endLabel(s: Series) = s.label ?: "${s.name} ${num(s.points.last(), percent)}"
     // Room on the right for the labels of lines that run to the last x (shorter lines label inside the plot).
-    val right = max(MIN_RIGHT, series.filter { it.values.size == xs.size }.maxOfOrNull { (textW(endLabel(it)) + 18).toInt() } ?: 0)
+    val right = max(MIN_RIGHT, series.filter { it.points.size == xs.size }.maxOfOrNull { (textW(endLabel(it)) + 18).toInt() } ?: 0)
     val top = TOP + if (subtitle != null) 18 else 0
     val legendY = if (subtitle != null) 56 else 38
     val plotW = W - LEFT - right
@@ -124,13 +137,16 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
                 lx += 30 + textW(s.name)
             }
         }
-        // Recessive grid and y ticks (powers of ten on a log axis).
+        // Recessive grid and y ticks (powers of ten on a log axis; every other one labeled when they would crowd).
+        val labelEvery = if (logY && hi - lo > 7) 2 else 1
         var t = lo
         while (t <= hi + 1e-9) {
             val y = pyRaw(t)
-            val label = if (logY) logTick(t.toInt()) else tick(t, step, percent)
+            val label = if (logY) format?.invoke(10.0.pow(t)) ?: logTick(t.toInt()) else tick(t, step, percent)
             append("""<line class="grid" x1="$LEFT" x2="${LEFT + plotW}" y1="${f(y)}" y2="${f(y)}" stroke-width="1"/>""")
-            append("""<text class="t2" x="${LEFT - 8}" y="${f(y + 4)}" font-size="11" text-anchor="end">$label</text>""")
+            if (Math.round((t - lo) / step) % labelEvery == 0L) {
+                append("""<text class="t2" x="${LEFT - 8}" y="${f(y + 4)}" font-size="11" text-anchor="end">${esc(label)}</text>""")
+            }
             t += step
         }
         append("""<line class="axis" x1="$LEFT" x2="${LEFT + plotW}" y1="${f(pyRaw(lo))}" y2="${f(pyRaw(lo))}" stroke-width="1"/>""")
@@ -139,7 +155,8 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
         refLine?.let { r ->
             val y = py(r.value)
             append("""<line class="axis" x1="$LEFT" x2="${LEFT + plotW}" y1="${f(y)}" y2="${f(y)}" stroke-width="1" stroke-dasharray="4 4"/>""")
-            append("""<text class="t2" x="${LEFT + plotW - 4}" y="${f(y - 6)}" font-size="11" text-anchor="end">${esc(r.label)}</text>""")
+            if (r.atStart) append("""<text class="t2" x="${LEFT + 4}" y="${f(y - 6)}" font-size="11">${esc(r.label)}</text>""")
+            else append("""<text class="t2" x="${LEFT + plotW - 4}" y="${f(y - 6)}" font-size="11" text-anchor="end">${esc(r.label)}</text>""")
         }
         split?.let { sp ->
             val x = (px(sp.after) + px(sp.after + 1)) / 2
@@ -156,7 +173,7 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
         }
         append("""<text class="t2" x="${LEFT + plotW / 2}" y="${H - 10}" font-size="12" text-anchor="middle">${esc(xLabel)}</text>""")
         // Lines, then markers with a surface ring, then a direct label at the end of each line.
-        val ends = series.filter { !it.labelBefore }.map { it to py(it.values.last()) }.sortedBy { it.second }
+        val ends = series.filter { !it.labelBefore }.map { it to py(it.points.last()) }.sortedBy { it.second }
         val labelY = HashMap<Series, Double>()
         var lastY = Double.NEGATIVE_INFINITY
         for ((s, y) in ends) {
@@ -167,12 +184,21 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
         for (s in series) {
             val pts = s.values.mapIndexed { i, value -> "${f(px(i))},${f(py(value))}" }.joinToString(" ")
             append("""<polyline class="l${s.shade}" points="$pts" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>""")
+            if (s.estimate.isNotEmpty()) {
+                val from = s.values.size - 1
+                val est = (listOf(s.values.last()) + s.estimate).mapIndexed { j, value -> "${f(px(from + j))},${f(py(value))}" }.joinToString(" ")
+                append("""<polyline class="l${s.shade}" points="$est" fill="none" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>""")
+            }
             s.values.forEachIndexed { i, value ->
                 append("""<circle class="m${s.shade} ring" cx="${f(px(i))}" cy="${f(py(value))}" r="4" stroke-width="2"><title>${esc(s.name)} · ${esc(xs[i])}: ${num(value, percent)}</title></circle>""")
             }
-            val lastX = px(s.values.size - 1)
+            s.estimate.forEachIndexed { j, value ->
+                val i = s.values.size + j
+                append("""<circle class="bg l${s.shade}" cx="${f(px(i))}" cy="${f(py(value))}" r="3.5" stroke-width="2"><title>${esc(s.name)} · ${esc(xs[i])}: ${num(value, percent)} (추정)</title></circle>""")
+            }
+            val lastX = px(s.points.size - 1)
             if (s.labelBefore) {
-                append("""<text class="t1" x="${f(lastX - 10)}" y="${f(py(s.values.last()) + 4)}" font-size="12" text-anchor="end">${esc(endLabel(s))}</text>""")
+                append("""<text class="t1" x="${f(lastX - 10)}" y="${f(py(s.points.last()) + 4)}" font-size="12" text-anchor="end">${esc(endLabel(s))}</text>""")
             } else {
                 append("""<text class="t1" x="${f(lastX + 10)}" y="${f(labelY.getValue(s) + 4)}" font-size="12">${esc(endLabel(s))}</text>""")
             }

@@ -65,6 +65,8 @@ android {
             // ./gradlew :app:testDebugUnitTest -ProuteBench [-ProuteWrite]: route algorithm benchmark (docs/route.md).
             if (project.hasProperty("routeBench")) {
                 it.filter.includeTestsMatching("*RouteBench*")
+                // Held-Karp at n = 20 keeps about 250MB of tables.
+                it.maxHeapSize = "2g"
                 it.systemProperty("route.run", "true")
                 it.systemProperty("route.write", project.hasProperty("routeWrite").toString())
                 it.systemProperty("route.out", rootProject.file("docs/route.md").absolutePath)
