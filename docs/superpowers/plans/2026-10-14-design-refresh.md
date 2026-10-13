@@ -987,7 +987,8 @@ git commit -q -m "home: headline, near and meta copy as tested functions; name t
 - Produces:
   - `MapPlace`에 필드 두 개를 더해요: `MapPlace(id, at, radiusM, initial, ended, selected, number: Int? = null, near: Boolean = false, couponStop: Boolean = false)`
   - `enum class PinShape { CIRCLE, SQUARE }`
-  - `data class PinStyle(text, fill, ring, textColor, sizeDp: Int, ringDp: Float, shape: PinShape)`
+  - `data class PinStyle(text, fill, ring, textColor, sizeDp: Int, ringDp: Float, shape: PinShape, icon: Boolean = false)`: `icon`이면 글자 대신 선물 상자 아이콘을 그려요(쿠폰 지점).
+  - `MapBranch(id, at, urgent, near)`: 이니셜 필드를 없애요. 지점 핀은 "스" 같은 글자 대신 선물 상자 아이콘이에요(사용자 요청, 2026-10-14). 지금 `HomeScreen.kt`와 `StatusScreen.kt`의 `MapBranch(...)` 호출에서 이니셜 인자 하나만 지워요(두 파일은 아직 legacy라 나머지는 그대로).
   - `data class RadiusStyle(fill: Color, stroke: Color)`
   - `placePin(p: MapPlace): PinStyle`, `branchPin(b: MapBranch): PinStyle`, `ME_PIN: PinStyle`, `radiusStyle(p: MapPlace): RadiusStyle`, `REFRESH_AREA: RadiusStyle`
   - `SpotMap(...)` 매개변수:
@@ -1051,10 +1052,12 @@ class PinsTest {
     }
 
     @Test
-    fun `branches are squares, lime when near, orange-ringed when urgent`() {
-        val b = MapBranch("b", Coords(37.5, 127.0), "스", urgent = true, near = true)
+    fun `branches are gift squares, lime when near, orange-ringed when urgent`() {
+        val b = MapBranch("b", Coords(37.5, 127.0), urgent = true, near = true)
         val s = branchPin(b)
         assertEquals(PinShape.SQUARE, s.shape)
+        assertEquals(true, s.icon)
+        assertEquals("", s.text)
         assertEquals(SnapColors.lime, s.fill)
         assertEquals(SnapColors.urgent, s.ring)
         assertEquals(SnapColors.surface, branchPin(b.copy(near = false)).fill)
@@ -1087,8 +1090,11 @@ import com.capstone.snapspot.ui.theme.SnapColors
 
 enum class PinShape { CIRCLE, SQUARE }
 
-/** How one map label is drawn: a circle or a 4dp-rounded square, a ring, and a short text. */
-data class PinStyle(val text: String, val fill: Color, val ring: Color, val textColor: Color, val sizeDp: Int, val ringDp: Float, val shape: PinShape)
+/** How one map label is drawn: a circle or a 4dp-rounded square, a ring, and a short text (or, with `icon`, a gift box). */
+data class PinStyle(
+    val text: String, val fill: Color, val ring: Color, val textColor: Color, val sizeDp: Int, val ringDp: Float, val shape: PinShape,
+    val icon: Boolean = false,
+)
 
 /** An alert radius circle around a saved place. */
 data class RadiusStyle(val fill: Color, val stroke: Color)
@@ -1104,10 +1110,10 @@ fun placePin(p: MapPlace): PinStyle = when {
     )
 }
 
-/** Franchise branches are small white squares: lime when near, ringed in urgent orange when the coupon ends soon. */
+/** Coupon branches are small white squares with a gift icon: lime when near, ringed in urgent orange when the coupon ends soon. */
 fun branchPin(b: MapBranch): PinStyle = PinStyle(
-    b.initial, if (b.near) SnapColors.lime else SnapColors.surface, if (b.urgent) SnapColors.urgent else SnapColors.ink,
-    SnapColors.ink, 20, if (b.urgent) 2.5f else 1.5f, PinShape.SQUARE,
+    "", if (b.near) SnapColors.lime else SnapColors.surface, if (b.urgent) SnapColors.urgent else SnapColors.ink,
+    SnapColors.ink, 22, if (b.urgent) 2.5f else 1.5f, PinShape.SQUARE, icon = true,
 )
 
 val ME_PIN = PinStyle("", SnapColors.me, SnapColors.surface, SnapColors.surface, 16, 3f, PinShape.CIRCLE)
@@ -1214,8 +1220,8 @@ data class MapPlace(
     val couponStop: Boolean = false,
 )
 
-/** A registered franchise branch: a small square, no radius. */
-data class MapBranch(val id: String, val at: Coords, val initial: String, val urgent: Boolean, val near: Boolean)
+/** A registered coupon branch: a small square with a gift icon, no radius. */
+data class MapBranch(val id: String, val at: Coords, val urgent: Boolean, val near: Boolean)
 
 /** Where the camera should go; `seq` changes for every request so the same spot can be re-focused. */
 data class MapFocus(val at: Coords, val seq: Long, val zoom: Int = 16)
@@ -1420,7 +1426,25 @@ private fun badge(s: PinStyle, density: Float, face: Typeface): Bitmap {
         p.textSize = size * 0.46f
         c.drawText(s.text, half, half - (p.descent() + p.ascent()) / 2, p)
     }
+    if (s.icon) gift(c, half, half, size * 0.56f, s.textColor.toArgb())
     return bmp
+}
+
+/** A gift box outline (lid, body, ribbon, bow) `w` wide, centered on (cx, cy): coupon branches carry it instead of a letter. */
+private fun gift(c: Canvas, cx: Float, cy: Float, w: Float, color: Int) {
+    val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        style = Paint.Style.STROKE
+        strokeWidth = w * 0.12f
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+    }
+    val h = w / 2
+    c.drawRect(cx - h, cy - w * 0.16f, cx + h, cy + w * 0.04f, p)
+    c.drawRect(cx - h * 0.82f, cy + w * 0.04f, cx + h * 0.82f, cy + w * 0.46f, p)
+    c.drawLine(cx, cy - w * 0.16f, cx, cy + w * 0.46f, p)
+    c.drawCircle(cx - w * 0.15f, cy - w * 0.3f, w * 0.12f, p)
+    c.drawCircle(cx + w * 0.15f, cy - w * 0.3f, w * 0.12f, p)
 }
 ```
 
@@ -1453,6 +1477,29 @@ git commit -q -m "map: ink and lime pins as tested styles, full-bleed map with b
   - Task 3: `homeHeadline`, `nearPlaces`, `placeMeta`, `couponMeta`, `bundleTitle`, `listHeader`, `HomeViewModel.hereName`
   - Task 4: `SpotMap(padBottom = …)`, `MapPlace(near = …, couponStop = …)`
 - Produces: 화면만 바뀌고 `HomeScreen(vm, onAdd, onStatus, onCoupon, onAskPermissions)` 시그니처는 그대로예요.
+
+- [ ] **Step 0: 홈 문구를 다듬어요 (사용자 요청, 2026-10-14: "지켜보다·감시" 표현 빼기)**
+
+Task 3에서 만든 문구 하나를 바꿔요. 근처에 갈 곳이 없고 알림이 켜져 있을 때 큰 문장은 숫자만 말해요.
+
+`HomeCopyTest.kt`의 `nothing nearby says what is being watched` 테스트를 이렇게 바꿔요.
+
+```kotlin
+    @Test
+    fun `nothing nearby just counts the saved places`() {
+        val h = homeHeadline(null, near = 0, saved = 5, alertsOn = true)
+        assertNull(h.kicker)
+        assertNull(h.count)
+        assertEquals("저장한 곳 5곳", h.text)
+    }
+```
+
+Run: `./gradlew :app:testDebugUnitTest --tests "com.capstone.snapspot.ui.home.HomeCopyTest" --console=plain -q`
+Expected: FAIL, `expected: <저장한 곳 5곳> but was: <저장한 곳 5곳을 지켜보고 있어요>`
+
+`HomeCopy.kt`의 `alertsOn -> Headline(kicker, "저장한 곳 ${saved}곳을 지켜보고 있어요")`를 `alertsOn -> Headline(kicker, "저장한 곳 ${saved}곳")`로 바꾸고, 같은 테스트가 통과하는지 확인해요.
+
+`Components.kt`의 `FloatingChip` 설명 주석 `(logo, "12곳 지켜보는 중", back to the list)`도 `(logo, "알림 12곳", back to the list)`로 바꿔요.
 
 - [ ] **Step 1: 감시 목록에서 두 파일을 빼고 실패하는지 확인해요**
 
@@ -1628,7 +1675,8 @@ fun HomeScreen(
     val numberOf = stops.mapIndexedNotNull { i, st -> st.placeId?.let { it to i + 1 } }.toMap()
     val mapPlaces = places.map {
         MapPlace(
-            it.id, Coords(it.latitude, it.longitude), it.radius.toDouble(), initial(it.name), placeEnded(it, now),
+            // An open route shows the line and numbered stops only: alert circles would clutter it.
+            it.id, Coords(it.latitude, it.longitude), if (open != null) 0.0 else it.radius.toDouble(), initial(it.name), placeEnded(it, now),
             it.id == selected, numberOf[it.id], near = it.id in near,
         )
     } + stops.mapIndexedNotNull { i, st ->
@@ -1638,7 +1686,7 @@ fun HomeScreen(
     val routeLine = if (open == null) emptyList() else listOfNotNull(open.start) + stops.map { it.at }
     val mapBranches = win?.branches.orEmpty().map { (id, b) ->
         val at = Coords(b.latitude, b.longitude)
-        MapBranch(id, at, initial(b.name), b.urgent, here?.let { distanceMeters(it, at) <= BRANCH_RADIUS_M } == true)
+        MapBranch(id, at, b.urgent, here?.let { distanceMeters(it, at) <= BRANCH_RADIUS_M } == true)
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(SnapColors.bg)) {
@@ -1819,7 +1867,7 @@ private fun WatchChip(on: Boolean, watching: Int, onClick: () -> Unit) {
     FloatingChip(onClick = onClick) {
         Dot(if (on) SnapColors.limeDeep else SnapColors.urgent)
         Gap(6.dp)
-        Text(if (on) "${watching}곳 지켜보는 중" else "알림 꺼짐", style = SnapType.label.copy(color = SnapColors.ink), maxLines = 1)
+        Text(if (on) "알림 ${watching}곳 ›" else "알림 꺼짐 ›", style = SnapType.label.copy(color = SnapColors.ink), maxLines = 1)
     }
 }
 
@@ -1972,7 +2020,8 @@ S=C:/Users/hasan/AppData/Local/Temp/claude/C--Users-hasan-Downloads-capstone/a3f
 
 확인할 것(스크린샷을 Read로 열어 봐요):
 - 지도가 상태 표시줄 밑까지 채워지는지
-- 왼쪽 위에 "SnapSpot" 칩, 오른쪽 위에 "N곳 지켜보는 중" 칩이 있는지
+- 왼쪽 위에 "SnapSpot" 칩, 오른쪽 위에 "알림 N곳 ›" 칩이 있는지
+- 동선을 열면 장소의 반경 원이 사라지고 선과 번호 핀만 남는지
 - 시트가 화면의 약 45%이고 큰 문장 → 묶음 카드 → 장소/쿠폰 → 목록 순서인지
 - + 버튼이 오른쪽 아래에 있는지
 
@@ -2001,7 +2050,8 @@ MSYS_NO_PATHCONV=1 "$ADB" shell run-as com.capstone.snapspot cp /data/local/tmp/
 - [ ] **Step 6: 커밋해요**
 
 ```bash
-git add app/src/main/java/com/capstone/snapspot/ui/home/HomeScreen.kt app/src/main/java/com/capstone/snapspot/MainActivity.kt app/src/test/java/com/capstone/snapspot/ui/StyleGuardTest.kt
+git add app/src/main/java/com/capstone/snapspot/ui/home app/src/main/java/com/capstone/snapspot/ui/components/Components.kt app/src/main/java/com/capstone/snapspot/MainActivity.kt \
+  app/src/test/java/com/capstone/snapspot/ui/home/HomeCopyTest.kt app/src/test/java/com/capstone/snapspot/ui/StyleGuardTest.kt
 git commit -q -m "home: full-screen map with a bottom sheet, headline, grouped rows and route view"
 ```
 
@@ -2241,7 +2291,7 @@ fun AddScreen(
                     Modifier.padding(start = 4.dp, top = 4.dp, bottom = 8.dp),
                 )
                 WideShot(d.imageUri, if (isCoupon) null else matchLabel(d.matched, d.coords != null))
-                Segmented(listOf("place", "coupon"), d.kind, vm::setKind, { if (it == "place") "가 볼 장소" else "프랜차이즈 쿠폰" })
+                Segmented(listOf("place", "coupon"), d.kind, vm::setKind, { if (it == "place") "가 볼 장소" else "기프티콘" })
                 if (isCoupon) CouponForm(vm, d) else PlaceForm(vm, d)
                 Spacer(Modifier.height(8.dp))
             }
@@ -2437,7 +2487,7 @@ private fun CouponForm(vm: AddViewModel, d: Draft) {
             else -> {
                 val shown = branches.take(7)
                 Preview(
-                    "가까운 ${d.brand} ${shown.size}곳을 지켜봐요",
+                    "근처 ${d.brand}에 가면 알려 드려요",
                     "가장 가까운 곳은 ${shown[0].name}(${formatDistance(distanceMeters(at, Coords(shown[0].latitude, shown[0].longitude)))})이에요. 이동하면 그 근처 지점으로 바꿔 가며 알려 드려요.",
                 )
                 Column {
@@ -2616,6 +2666,11 @@ fun CouponScreen(vm: HomeViewModel, id: String, onClose: () -> Unit) {
             if (c != null) Box {
                 IconTap(Icons.Filled.MoreVert, "더 보기", { menu = true })
                 DropdownMenu(menu, { menu = false }, containerColor = SnapColors.surface, shape = SnapShapes.card) {
+                    // For demos indoors: the alert this coupon would send near a branch. Not a button on the screen.
+                    if (active) DropdownMenuItem(
+                        text = { Text("알림 미리 보기", style = SnapType.body) },
+                        onClick = { menu = false; vm.testCoupon(c) },
+                    )
                     DropdownMenuItem(
                         text = { Text("쿠폰 삭제", style = SnapType.body.copy(color = SnapColors.danger)) },
                         onClick = { menu = false; confirmDelete = true },
@@ -2665,8 +2720,7 @@ fun CouponScreen(vm: HomeViewModel, id: String, onClose: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(SnapSpace.gap),
         ) {
             if (active) {
-                SecondaryButton("알림 테스트", { vm.testCoupon(c) }, Modifier.weight(1f))
-                PrimaryButton("사용했어요", { vm.markUsed(c); onClose() }, Modifier.weight(1.4f))
+                PrimaryButton("사용했어요", { vm.markUsed(c); onClose() }, Modifier.fillMaxWidth())
             } else {
                 SecondaryButton("쿠폰 삭제", { confirmDelete = true }, Modifier.fillMaxWidth())
             }
@@ -2801,8 +2855,8 @@ fun StatusScreen(vm: HomeViewModel, onBack: () -> Unit, onAskPermissions: () -> 
             verticalArrangement = Arrangement.spacedBy(SnapSpace.gap),
         ) {
             BigTitle(
-                if (perms.alertsOn) "앱을 닫아도" else "지금은",
-                if (perms.alertsOn) "${watching}곳을 지켜보고 있어요" else "앱을 열어 둔 동안만 알려 드려요",
+                if (perms.alertsOn) null else "지금은",
+                if (perms.alertsOn) "알림 장소 ${watching}곳" else "앱을 열어 둔 동안만 알려 드려요",
                 Modifier.padding(start = 4.dp, top = 4.dp, bottom = 8.dp),
             )
 
@@ -2818,8 +2872,8 @@ fun StatusScreen(vm: HomeViewModel, onBack: () -> Unit, onAskPermissions: () -> 
                     }
                     SlotMeter(MAX_REGIONS, parts)
                     Text(
-                        "휴대폰은 한 번에 ${MAX_REGIONS}곳까지만 지켜볼 수 있어요. 저장한 장소를 먼저, 그다음 유효기간이 임박한 쿠폰 순으로 담고, " +
-                            "쿠폰은 브랜드마다 가장 가까운 7곳만 담아요. 지금 위치에서 ${(REFRESH_RADIUS_M / 1000).toInt()}km를 벗어나면 그 자리에서 다시 골라요.",
+                        "휴대폰은 한 번에 ${MAX_REGIONS}곳까지만 알림을 걸 수 있어요. 저장한 장소를 먼저, 그다음 유효기간이 임박한 쿠폰 순으로 담아요. " +
+                            "지금 위치에서 ${(REFRESH_RADIUS_M / 1000).toInt()}km를 벗어나면 그 자리에서 다시 골라요.",
                         style = SnapType.meta,
                     )
                 }
@@ -2828,7 +2882,7 @@ fun StatusScreen(vm: HomeViewModel, onBack: () -> Unit, onAskPermissions: () -> 
             win?.here?.let { center ->
                 SpotMap(
                     places = places.map { MapPlace(it.id, Coords(it.latitude, it.longitude), it.radius.toDouble(), it.name.take(1), placeEnded(it, now), false) },
-                    branches = win?.branches.orEmpty().map { (id, b) -> MapBranch(id, Coords(b.latitude, b.longitude), b.name.take(1), b.urgent, false) },
+                    branches = win?.branches.orEmpty().map { (id, b) -> MapBranch(id, Coords(b.latitude, b.longitude), b.urgent, false) },
                     here = here,
                     focus = MapFocus(center, 0, 14),
                     refresh = center to REFRESH_RADIUS_M,
@@ -2984,8 +3038,8 @@ tap "동선 보기"; "$ADB" exec-out screencap -p > $D/bundle-route.png
 | `bundle-coupon.png` | 동선 화면에서 "쿠폰 포함" 스위치를 누르고 2초 뒤 찍어요. 흰 네모 번호 핀이 보여야 해요. |
 | `home.png` 재확인 | 왼쪽 위 "‹ … 코스" 칩을 눌러 목록으로 돌아와요. |
 | `coupon-open.png` | "쿠폰 1" 탭, 쿠폰 행 순서로 눌러요. |
-| `coupon-alert.png` | 쿠폰 화면에서 "알림 테스트"를 누르고 `"$ADB" shell cmd statusbar expand-notifications`를 실행한 뒤 찍어요. 그다음 `collapse`로 접어요. |
-| `status.png` | 홈에서 "N곳 지켜보는 중" 칩을 눌러요. |
+| `coupon-alert.png` | 쿠폰 화면 오른쪽 위 ⋮ 메뉴에서 "알림 미리 보기"를 누르고 `"$ADB" shell cmd statusbar expand-notifications`를 실행한 뒤 찍어요. 그다음 `collapse`로 접어요. |
+| `status.png` | 홈에서 "알림 N곳 ›" 칩을 눌러요. |
 | `coupon-add.png` | 공유 시트로 쿠폰 이미지를 넣어 확인 화면이 뜨면 찍어요. 넣는 명령은 아래에 있어요. |
 
 `coupon-add.png`용 이미지를 넣는 명령이에요. `docs/samples/`(추적하지 않는 폴더)에 있는 쿠폰 이미지를 써요.
