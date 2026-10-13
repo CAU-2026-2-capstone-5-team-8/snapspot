@@ -131,7 +131,7 @@ fun HomeScreen(
                         },
                     )
                     Box(
-                        Modifier.align(Alignment.BottomEnd).padding(12.dp).size(44.dp).shadow(3.dp, CircleShape).clip(CircleShape)
+                        Modifier.align(Alignment.TopEnd).padding(12.dp).size(44.dp).shadow(3.dp, CircleShape).clip(CircleShape)
                             .background(SnapColors.surface).clickable { vm.focusHere() },
                         contentAlignment = Alignment.Center,
                     ) { Icon(Icons.Filled.MyLocation, contentDescription = "내 위치로", tint = SnapColors.ink) }
