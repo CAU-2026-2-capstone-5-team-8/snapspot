@@ -128,7 +128,7 @@ class RouteBench {
             .takeWhile { it <= BRUTE_DRAW_MAX_MS }
         val timeChart = lineChart(
             title = "장소 수별 계산 시간 (PC 측정, 중앙값)", xLabel = "장소 수 n", xs = NS.map { "$it" }, yLabel = "",
-            subtitle = "세로축 한 칸 = 10배. 점선은 추정(n!에 비례), 1ms 아래 엇갈림은 측정 잡음",
+            subtitle = "세로축 한 칸 = 10배. 점선은 추정(n!에 비례)",
             series = listOf(
                 Series(
                     "완전 탐색", 0, bruteRows.map { it.brute!! },
