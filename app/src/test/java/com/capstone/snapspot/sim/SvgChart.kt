@@ -80,6 +80,8 @@ fun lineChart(
     split: Split? = null,
     /** Formats values (ticks on a log axis, end labels, tooltips) instead of plain numbers, e.g. as durations. */
     format: ((Double) -> String)? = null,
+    /** Room below the lowest tick, in axis units, so a line sitting on that value stays clear of the axis. */
+    bottomPad: Double = 0.0,
 ): String {
     val all = series.flatMap { it.points }
     fun num(v: Double, percent: Boolean) = format?.invoke(v) ?: plainNum(v, percent)
@@ -109,8 +111,9 @@ fun lineChart(
     val plotW = W - LEFT - right
     val plotH = H - top - BOTTOM
     fun px(i: Int) = LEFT + if (xs.size == 1) plotW / 2.0 else plotW * i / (xs.size - 1).toDouble()
-    fun py(v: Double) = top + plotH * (1 - (tr(v) - lo) / (hi - lo))
-    fun pyRaw(t: Double) = top + plotH * (1 - (t - lo) / (hi - lo))
+    val base = lo - bottomPad
+    fun py(v: Double) = top + plotH * (1 - (tr(v) - base) / (hi - base))
+    fun pyRaw(t: Double) = top + plotH * (1 - (t - base) / (hi - base))
     fun f(v: Double) = String.format(Locale.US, "%.1f", v)
     val lightCss = seriesCss(palette.light)
     val darkCss = seriesCss(palette.dark)
@@ -150,7 +153,7 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
             }
             t += step
         }
-        append("""<line class="axis" x1="$LEFT" x2="${LEFT + plotW}" y1="${f(pyRaw(lo))}" y2="${f(pyRaw(lo))}" stroke-width="1"/>""")
+        append("""<line class="axis" x1="$LEFT" x2="${LEFT + plotW}" y1="${f(pyRaw(base))}" y2="${f(pyRaw(base))}" stroke-width="1"/>""")
         append("""<text class="t2" x="${LEFT - 8}" y="${top - 10}" font-size="11" text-anchor="end">${esc(yLabel)}</text>""")
         // Guides sit under the data: a threshold across, a divider down.
         refLine?.let { r ->
@@ -161,7 +164,7 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
         }
         split?.let { sp ->
             val x = (px(sp.after) + px(sp.after + 1)) / 2
-            append("""<line class="axis" x1="${f(x)}" x2="${f(x)}" y1="$top" y2="${f(pyRaw(lo))}" stroke-width="1" stroke-dasharray="4 4"/>""")
+            append("""<line class="axis" x1="${f(x)}" x2="${f(x)}" y1="$top" y2="${f(pyRaw(base))}" stroke-width="1" stroke-dasharray="4 4"/>""")
             append("""<text class="t2" x="${f(x - 6)}" y="${top + 12}" font-size="11" text-anchor="end">${esc(sp.left)}</text>""")
             append("""<text class="t2" x="${f(x + 6)}" y="${top + 12}" font-size="11">${esc(sp.right)}</text>""")
         }

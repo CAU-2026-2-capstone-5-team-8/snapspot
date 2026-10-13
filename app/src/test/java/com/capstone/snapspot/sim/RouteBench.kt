@@ -150,6 +150,8 @@ class RouteBench {
                 Series("Held-Karp (정답)", 3, rows.filter { !it.vsMst }.map { 0.0 }),
             ),
             split = Split(switchAt, "앱은 정답 사용", "2-opt·Or-opt 사용"),
+            // Held-Karp sits on 0%: lift it off the axis so the line reads as a line.
+            bottomPad = 2.0,
         )
         val md = routeDoc(table, cutoff, coupons)
         println(md)
