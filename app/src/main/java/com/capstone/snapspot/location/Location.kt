@@ -4,7 +4,9 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Geocoder
 import android.os.Looper
+import android.os.SystemClock
 import com.capstone.snapspot.core.Coords
+import com.capstone.snapspot.core.Fix
 import com.capstone.snapspot.geofence.hasFineLocation
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -59,6 +61,24 @@ class LocationTracker(private val ctx: Context) {
     @SuppressLint("MissingPermission")
     private suspend fun currentAt(priority: Int) =
         runCatching { fused.getCurrentLocation(priority, null).await() }.getOrNull()
+}
+
+/**
+ * One position with its speed, for background work. A fix from the last minute is reused;
+ * otherwise Wi-Fi/cell first, then GPS once (emulators and places without Wi-Fi have no network fix).
+ * `needSpeed`: GPS first, since Wi-Fi/cell fixes carry no speed and "still on the bus" would read as walking.
+ */
+@SuppressLint("MissingPermission")
+suspend fun currentFix(ctx: Context, needSpeed: Boolean = false): Fix? {
+    if (!hasFineLocation(ctx)) return null
+    val fused = LocationServices.getFusedLocationProviderClient(ctx)
+    suspend fun at(priority: Int) = runCatching { fused.getCurrentLocation(priority, null).await() }.getOrNull()
+    val last = runCatching { fused.lastLocation.await() }.getOrNull()
+        ?.takeIf { SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos < 60_000_000_000L }
+    val loc = (if (needSpeed) at(Priority.PRIORITY_HIGH_ACCURACY) ?: last ?: at(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
+    else last ?: at(Priority.PRIORITY_BALANCED_POWER_ACCURACY) ?: at(Priority.PRIORITY_HIGH_ACCURACY))
+        ?: return null
+    return Fix(Coords(loc.latitude, loc.longitude), loc.takeIf { it.hasSpeed() }?.speed)
 }
 
 /**

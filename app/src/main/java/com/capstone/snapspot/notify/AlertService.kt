@@ -16,18 +16,22 @@ interface Notifier {
 }
 
 /**
- * Decides whether an Enter event alerts. Geofence Enter events often arrive in pairs, and the
- * in-app watcher can fire at the same time, so check → show → record runs one at a time and the
- * cooldown always sees the previous alert.
+ * Decides whether an Enter event alerts. Nothing is shown while the app is on screen (and no
+ * cooldown is recorded, so the next visit still alerts). Geofence Enter events often arrive in
+ * pairs, and a held alert's recheck can fire at the same time, so check → show → record runs one
+ * at a time and the cooldown always sees the previous alert.
  */
 class AlertService(
     private val repo: Repository,
     private val notifier: Notifier,
+    /** True while the app is on screen: its own "지금 근처예요" marks do the job, no notification. */
+    private val onScreen: () -> Boolean = { false },
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val lock = Mutex()
 
     suspend fun onPlaceEnter(placeId: String, force: Boolean = false): Boolean = lock.withLock {
+        if (!force && onScreen()) return@withLock false
         val place = repo.places.value.firstOrNull { it.id == placeId } ?: return@withLock false
         val now = clock()
         if (!force && suppressReason(place, now) != null) return@withLock false
@@ -39,6 +43,7 @@ class AlertService(
 
     /** A branch region ("b|<brandKey>|<kakaoId>") was entered: alert with the brand's coupons, once per cooldown. */
     suspend fun onBranchEnter(regionId: String, force: Boolean = false): Boolean = lock.withLock {
+        if (!force && onScreen()) return@withLock false
         val key = brandKeyOfRegion(regionId)
         val now = clock()
         val coupons = repo.coupons.value

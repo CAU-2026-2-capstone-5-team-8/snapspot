@@ -18,7 +18,14 @@ class GeofenceReceiver : BroadcastReceiver() {
         if (ids.isEmpty()) return
         val work = OneTimeWorkRequestBuilder<GeofenceWorker>()
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-            .setInputData(workDataOf(GeofenceWorker.IDS to ids.toTypedArray(), GeofenceWorker.TRANSITION to event.geofenceTransition))
+            .setInputData(
+                workDataOf(
+                    GeofenceWorker.IDS to ids.toTypedArray(),
+                    GeofenceWorker.TRANSITION to event.geofenceTransition,
+                    // Speed at the moment of the event (m/s); -1 when the fix carried none.
+                    GeofenceWorker.SPEED to (event.triggeringLocation?.takeIf { it.hasSpeed() }?.speed ?: -1f),
+                ),
+            )
             .build()
         WorkManager.getInstance(context).enqueue(work)
     }
