@@ -39,9 +39,9 @@ class RecheckWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         val now = System.currentTimeMillis()
         val settled = mutableListOf<PendingAlert>()
         for (p in held) {
-            when (decidePending(p, fix, now)) {
+            when (decidePending(p, fix, now, onScreen = c.onScreen)) {
                 PendingDecision.ALERT -> {
-                    // Whatever AlertService answers (cooldown, coupon used, app on screen), this one is settled.
+                    // Whatever AlertService answers (cooldown, coupon used), this one is settled.
                     if (isBranchRegion(p.regionId)) c.alerts.onBranchEnter(p.regionId) else c.alerts.onPlaceEnter(p.regionId)
                     settled += p
                 }
