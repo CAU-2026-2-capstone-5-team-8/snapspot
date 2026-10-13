@@ -141,12 +141,13 @@ class RouteBench {
             split = Split(switchAt, "앱: ${EXACT_MAX}곳까지 Held-Karp", "${EXACT_MAX + 1}곳부터 2-opt·Or-opt"),
         )
         val gapChart = lineChart(
-            title = "2-opt·Or-opt 경로가 정답보다 몇 % 긴가 (정답 = Held-Karp)", xLabel = "장소 수 n", xs = NS.filter { it <= HELD_KARP_MAX }.map { "$it" }, yLabel = "%",
-            subtitle = "최근접 이웃으로 만든 경로에 2-opt, Or-opt를 차례로 더해요. 앱은 ③까지 써요",
+            title = "방법별 동선 길이 (정답 대비, 정답 = Held-Karp)", xLabel = "장소 수 n", xs = NS.filter { it <= HELD_KARP_MAX }.map { "$it" }, yLabel = "%",
+            subtitle = "Held-Karp는 정답이라 늘 0%. 최근접 이웃에 2-opt, Or-opt를 차례로 더해요(앱은 ③까지)",
             series = listOf(
                 Series("① 최근접 이웃", 0, rows.filter { !it.vsMst }.map { it.gapNn }),
                 Series("② + 2-opt", 1, rows.filter { !it.vsMst }.map { it.gap2 }),
                 Series("③ + Or-opt", 2, rows.filter { !it.vsMst }.map { it.gapAll }),
+                Series("Held-Karp (정답)", 3, rows.filter { !it.vsMst }.map { 0.0 }),
             ),
             split = Split(switchAt, "앱은 정답 사용", "2-opt·Or-opt 사용"),
         )
@@ -238,7 +239,7 @@ private fun routeDoc(table: String, cutoff: Int, coupons: String) = """## 동네
 - 거리 차이: ${if (HELD_KARP_MAX >= NS.last()) "모든 n에서 Held-Karp 최적해와 비교한 평균이에요." else "n ≤ ${HELD_KARP_MAX}는 Held-Karp 최적해와 비교한 평균. 그보다 크면 MST 하한과 비교한 값이라 실제 차이보다 큰 **상한**이에요(MST 하한은 최적보다 보통 15~20% 짧아요)."}
 
 ![장소 수별 실행 시간](route/time.svg)
-![2-opt·Or-opt의 최적 대비 거리 차이](route/gap.svg)
+![방법별 동선 길이 (Held-Karp의 정답 대비)](route/gap.svg)
 
 $table
 ### 쿠폰 쓸 곳 포함: 지점 고르기
