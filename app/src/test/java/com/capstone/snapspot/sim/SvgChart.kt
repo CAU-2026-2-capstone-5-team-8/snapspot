@@ -17,10 +17,10 @@ import kotlin.math.pow
 
 /**
  * `shade`: palette slot 0..2. `label`: the direct label at the line's end, instead of "name value".
- * `labelAbove`: put that label above the last point, ending there (for a line that stops mid-plot and would
+ * `labelBefore`: put that label left of the last point, ending there (for a line that stops mid-plot and would
  * otherwise label across the lines to its right).
  */
-class Series(val name: String, val shade: Int, val values: List<Double>, val label: String? = null, val labelAbove: Boolean = false)
+class Series(val name: String, val shade: Int, val values: List<Double>, val label: String? = null, val labelBefore: Boolean = false)
 
 /** A dashed horizontal guide at `value` (a threshold), labeled at the plot's right edge. */
 class RefLine(val value: Double, val label: String)
@@ -78,6 +78,8 @@ fun lineChart(
         step = 1.0
         lo = floor(log10(all.min()))
         hi = ceil(log10(all.max()))
+        // Keep the top decade's upper part free for guide labels when the data nearly touches it.
+        if (hi - log10(all.max()) < 0.3) hi += 1
     } else {
         step = if (percent) 10.0 else niceStep(all.max())
         lo = if (percent) floor((all.min() - 2) / step) * step else 0.0
@@ -154,7 +156,7 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
         }
         append("""<text class="t2" x="${LEFT + plotW / 2}" y="${H - 10}" font-size="12" text-anchor="middle">${esc(xLabel)}</text>""")
         // Lines, then markers with a surface ring, then a direct label at the end of each line.
-        val ends = series.filter { !it.labelAbove }.map { it to py(it.values.last()) }.sortedBy { it.second }
+        val ends = series.filter { !it.labelBefore }.map { it to py(it.values.last()) }.sortedBy { it.second }
         val labelY = HashMap<Series, Double>()
         var lastY = Double.NEGATIVE_INFINITY
         for ((s, y) in ends) {
@@ -169,8 +171,8 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
                 append("""<circle class="m${s.shade} ring" cx="${f(px(i))}" cy="${f(py(value))}" r="4" stroke-width="2"><title>${esc(s.name)} · ${esc(xs[i])}: ${num(value, percent)}</title></circle>""")
             }
             val lastX = px(s.values.size - 1)
-            if (s.labelAbove) {
-                append("""<text class="t1" x="${f(lastX)}" y="${f(py(s.values.last()) - 18)}" font-size="12" text-anchor="end">${esc(endLabel(s))}</text>""")
+            if (s.labelBefore) {
+                append("""<text class="t1" x="${f(lastX - 10)}" y="${f(py(s.values.last()) + 4)}" font-size="12" text-anchor="end">${esc(endLabel(s))}</text>""")
             } else {
                 append("""<text class="t1" x="${f(lastX + 10)}" y="${f(labelY.getValue(s) + 4)}" font-size="12">${esc(endLabel(s))}</text>""")
             }
