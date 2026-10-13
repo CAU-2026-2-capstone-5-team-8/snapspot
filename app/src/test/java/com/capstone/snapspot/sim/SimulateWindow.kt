@@ -16,6 +16,7 @@ import com.capstone.snapspot.core.REFRESH_ID
 import com.capstone.snapspot.core.SEARCH_RADIUS_M
 import com.capstone.snapspot.core.Spot
 import com.capstone.snapspot.core.Tier
+import com.capstone.snapspot.core.VEHICLE_SPEED_MPS
 import com.capstone.snapspot.core.cellOf
 import com.capstone.snapspot.core.distanceMeters
 import com.capstone.snapspot.core.planRegions
@@ -86,7 +87,7 @@ private fun kakaoSearch(brand: String, here: Coords): List<Spot> {
         .map { it.first }
 }
 
-private class Trip(val points: List<Coords>, val meters: Double)
+private class Trip(val points: List<Coords>, val meters: Double, val speed: Double)
 
 /** A trip through 3–5 random waypoints, walking (1.4 m/s) or by bus (6 m/s), sampled every 10s. */
 private fun makeTrip(): Trip {
@@ -107,7 +108,7 @@ private fun makeTrip(): Trip {
         for (i in 0 until steps) points += at(ax + (bx - ax) * i / steps, ay + (by - ay) * i / steps)
         meters += len
     }
-    return Trip(points, meters)
+    return Trip(points, meters, speed)
 }
 
 private val trips = List(300) { makeTrip() }
@@ -150,6 +151,8 @@ private data class Result(
     val placeCaught: Int, val placeTotal: Int,
     /** (trip, brand) pairs where the trip passed a branch: alerted at least once / total. */
     val brandCaught: Int, val brandTotal: Int,
+    /** Alerts the app would post (caught place visits + brands alerted per trip), and those on bus trips. */
+    val alerts: Int, val busAlerts: Int,
 )
 
 private fun run(st: Strategy): Result {
@@ -162,6 +165,8 @@ private fun run(st: Strategy): Result {
     var placeTotal = 0
     var brandCaught = 0
     var brandTotal = 0
+    var alerts = 0
+    var busAlerts = 0
     val cache = HashSet<String>()
     val allSpots = places + branches
     for (trip in trips) {
@@ -206,19 +211,23 @@ private fun run(st: Strategy): Result {
         }
         brandTotal += brandSeen.size
         brandCaught += brandSeen.values.count { it }
+        val tripAlerts = brandSeen.values.count { it } + visits(trip, places).count { v -> (v.from..v.to).any { registered[it].contains(v.spot.id) } }
+        alerts += tripAlerts
+        if (trip.speed > VEHICLE_SPEED_MPS) busAlerts += tripAlerts
     }
-    return Result(caught, total, replans, requests, km, placeCaught, placeTotal, brandCaught, brandTotal)
+    return Result(caught, total, replans, requests, km, placeCaught, placeTotal, brandCaught, brandTotal, alerts, busAlerts)
 }
 
 private fun pct(a: Int, b: Int) = String.format(Locale.US, "%.1f%%", 100.0 * a / b)
 
 private fun table(rows: List<Pair<Strategy, Result>>) = buildString {
-    appendLine("| 전략 | 저장한 장소 | 쿠폰 알림 (지점을 지난 이동 중) | 지점 방문 전체 | 다시 고른 횟수 / km | 카카오 요청 |")
-    appendLine("|---|---|---|---|---|---|")
+    appendLine("| 전략 | 저장한 장소 | 쿠폰 알림 (지점을 지난 이동 중) | 지점 방문 전체 | 다시 고른 횟수 / km | 카카오 요청 | 버스로 지나가며 울린 알림 |")
+    appendLine("|---|---|---|---|---|---|---|")
     for ((st, r) in rows) {
         appendLine(
             "| ${st.name} | ${pct(r.placeCaught, r.placeTotal)} (${r.placeCaught}/${r.placeTotal}) | ${pct(r.brandCaught, r.brandTotal)} | " +
-                "${pct(r.caught - r.placeCaught, r.total - r.placeTotal)} | ${String.format(Locale.US, "%.2f", r.replans / r.km)} | ${r.requests} |",
+                "${pct(r.caught - r.placeCaught, r.total - r.placeTotal)} | ${String.format(Locale.US, "%.2f", r.replans / r.km)} | ${r.requests} | " +
+                "${pct(r.busAlerts, r.alerts)} (${r.busAlerts}/${r.alerts}) |",
         )
     }
 }
@@ -250,6 +259,7 @@ fun simulationReport(): String {
 - 계획: 지금 앱의 우선순위 규칙 (저장한 장소 먼저, 쿠폰 브랜드는 브랜드당 가장 가까운 7곳, 같은 등급 브랜드끼리 돌아가며)
 - 카카오 검색은 실제처럼 격자 칸 중심에서 반경 ${SEARCH_RADIUS_M / 1000.0}km, 최대 ${KAKAO_CAP}곳만 돌려준다고 가정
 - 별도 표시가 없으면 갱신 구역을 벗어난 뒤 앱이 깨어나 다시 고르기까지 2분 걸린다고 가정
+- **버스로 지나가며 울린 알림**: 지금 앱이 버스 이동 중에 울리는 알림의 비율이에요. 차량 속도에서는 알림을 미뤘다가, 근처에서 내려 걸을 때만 울리게 바꿨어요(이 시뮬레이션의 이동은 중간에 내리지 않아서, 내린 뒤 받는 알림은 세지 않아요).
 
 ${table(mainRows)}
 ### 브랜드당 지점 수 (90칸 · 갱신 1000m · 지연 2분)
