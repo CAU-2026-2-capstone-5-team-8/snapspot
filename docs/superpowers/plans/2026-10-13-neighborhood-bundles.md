@@ -29,10 +29,11 @@
 - A member was alerted on its own within the last 6 hours (before it joined a bundle) → no bundle alert yet. → Task 5 test `a member alerted recently holds the bundle alert back`.
 - Position unknown (no fix yet) → bundles still listed, route uses a free start. → Task 1 test `free start is never worse than any fixed first place`; Task 6 passes `null`.
 - Region names with no digits or only "동" → shown unchanged. → Task 2 test `region names lose their numbers`.
+- "쿠폰 쓸 곳 포함" on with no branch within 500m, or the branch fetch failing → the route stays places-only, and a failure is shown on the card. → Task 6 `toggleCoupons` stores `null` for a failed fetch (`couponsFailed`) and drops brands with no nearby branch.
 
 ---
 
-### Task 1: Route algorithms
+### Task 1: Route algorithms (generalized TSP)
 
 **Files:**
 - Create: `app/src/main/java/com/capstone/snapspot/core/Route.kt`
@@ -41,12 +42,14 @@
 **Interfaces:**
 - Consumes: `Coords`, `distanceMeters(a: Coords, b: Coords): Double` (`core/Distance.kt`).
 - Produces:
-  - `data class RouteResult(val order: List<Int>, val meters: Double)` — `order` indexes into the input `points`.
-  - `fun bruteForceRoute(points: List<Coords>, start: Coords?): RouteResult`
-  - `fun exactRoute(points: List<Coords>, start: Coords?): RouteResult` (Held-Karp)
-  - `fun heuristicRoute(points: List<Coords>, start: Coords?, twoOpt: Boolean = true, orOpt: Boolean = true): RouteResult`
-  - `fun mstLowerBound(points: List<Coords>, start: Coords?): Double`
-  - `fun shortestRoute(points: List<Coords>, start: Coords?): RouteResult`
+  - `typealias Stop = List<Coords>` — the options for one stop: a saved place has one, a coupon brand has its nearby branches.
+  - `data class RouteResult(val order: List<Int>, val picks: List<Int>, val meters: Double)` — `order[i]` is a stop index, `picks[i]` the option index chosen in that stop.
+  - `fun bruteForceRoute(stops: List<Stop>, start: Coords?): RouteResult`
+  - `fun exactRoute(stops: List<Stop>, start: Coords?): RouteResult` (Held-Karp over stops)
+  - `fun heuristicRoute(stops: List<Stop>, start: Coords?, twoOpt: Boolean = true, orOpt: Boolean = true, repick: Boolean = true): RouteResult`
+  - `fun lowerBound(stops: List<Stop>, start: Coords?): Double` (MST over stops)
+  - `fun shortestRoute(stops: List<Stop>, start: Coords?): RouteResult`
+  - `fun stopsOf(points: List<Coords>): List<Stop>` (one option each)
   - `fun walkMinutes(meters: Double): Int`
   - `const val EXACT_MAX = 10` (Task 3 replaces the value with the benchmark's cutoff).
 
@@ -63,86 +66,102 @@ import kotlin.random.Random
 class RouteTest {
     private val origin = Coords(37.5446, 127.0560)
 
-    /** `n` random points within ~600m of 성수, reproducible. */
-    private fun points(n: Int, seed: Int): List<Coords> {
+    private fun near(r: Random) = Coords(origin.latitude + (r.nextDouble() - 0.5) * 0.011, origin.longitude + (r.nextDouble() - 0.5) * 0.014)
+
+    /** `n` stops with 1..`maxOptions` options each, reproducible. */
+    private fun stops(n: Int, seed: Int, maxOptions: Int = 1): List<Stop> {
         val r = Random(seed)
-        return List(n) { Coords(origin.latitude + (r.nextDouble() - 0.5) * 0.011, origin.longitude + (r.nextDouble() - 0.5) * 0.014) }
+        return List(n) { List(1 + r.nextInt(maxOptions)) { near(r) } }
     }
 
-    private fun length(points: List<Coords>, start: Coords?, order: List<Int>): Double {
-        val path = listOfNotNull(start) + order.map { points[it] }
+    private fun length(stops: List<Stop>, start: Coords?, res: RouteResult): Double {
+        val path = listOfNotNull(start) + res.order.indices.map { stops[res.order[it]][res.picks[it]] }
         return path.zipWithNext().sumOf { (a, b) -> distanceMeters(a, b) }
     }
 
     @Test
-    fun `held-karp matches brute force`() {
-        for (seed in 1..25) {
-            val n = 3 + seed % 6
-            val pts = points(n, seed)
-            val start = if (seed % 2 == 0) Coords(origin.latitude + 0.003, origin.longitude) else null
-            val exact = exactRoute(pts, start)
-            val brute = bruteForceRoute(pts, start)
-            assertEquals(brute.meters, exact.meters, 1e-6, "seed $seed")
-            assertEquals(exact.meters, length(pts, start, exact.order), 1e-6)
-            assertEquals((0 until n).toSet(), exact.order.toSet())
-        }
-    }
-
-    @Test
-    fun `heuristic is never shorter than exact and never below the MST bound`() {
-        for (seed in 1..25) {
-            val pts = points(4 + seed % 9, seed)
+    fun `exact matches brute force, with and without branch choices`() {
+        for (seed in 1..30) {
+            val st = stops(3 + seed % 5, seed, maxOptions = if (seed % 2 == 0) 3 else 1)
             val start = if (seed % 3 == 0) null else origin
-            val exact = exactRoute(pts, start).meters
-            val h = heuristicRoute(pts, start)
-            assertTrue(h.meters >= exact - 1e-6, "seed $seed")
-            assertTrue(mstLowerBound(pts, start) <= exact + 1e-6, "seed $seed")
-            assertEquals(h.meters, length(pts, start, h.order), 1e-6)
+            val exact = exactRoute(st, start)
+            assertEquals(bruteForceRoute(st, start).meters, exact.meters, 1e-6, "seed $seed")
+            assertEquals(exact.meters, length(st, start, exact), 1e-6)
+            assertEquals(st.indices.toSet(), exact.order.toSet())
         }
     }
 
     @Test
-    fun `2-opt and Or-opt never make the route longer`() {
+    fun `picks the branch that keeps the walk short`() {
+        val a = origin
+        val b = Coords(origin.latitude + 0.0036, origin.longitude)                  // ~400m north
+        val onTheWay = Coords(origin.latitude + 0.0018, origin.longitude + 0.0011)  // ~100m off the middle
+        val farAway = Coords(origin.latitude + 0.0018, origin.longitude + 0.0113)   // ~1km east
+        val st = listOf(listOf(a), listOf(b), listOf(farAway, onTheWay))
+        for (res in listOf(exactRoute(st, a), heuristicRoute(st, a))) {
+            assertEquals(1, res.picks[res.order.indexOf(2)])
+        }
+    }
+
+    @Test
+    fun `heuristic is never shorter than exact and never below the lower bound`() {
+        for (seed in 1..30) {
+            val st = stops(4 + seed % 8, seed, maxOptions = 1 + seed % 3)
+            val start = if (seed % 3 == 0) null else origin
+            val exact = exactRoute(st, start).meters
+            val h = heuristicRoute(st, start)
+            assertTrue(h.meters >= exact - 1e-6, "seed $seed")
+            assertTrue(lowerBound(st, start) <= exact + 1e-6, "seed $seed")
+            assertEquals(h.meters, length(st, start, h), 1e-6)
+        }
+    }
+
+    @Test
+    fun `each improvement step only shortens the route`() {
         for (seed in 1..25) {
-            val pts = points(12 + seed % 9, seed)
-            val nn = heuristicRoute(pts, origin, twoOpt = false, orOpt = false).meters
-            val two = heuristicRoute(pts, origin, twoOpt = true, orOpt = false).meters
-            val both = heuristicRoute(pts, origin).meters
-            // Each local search only ever accepts shorter routes; the two may stop at different local optima.
-            assertTrue(two <= nn + 1e-6 && both <= nn + 1e-6, "seed $seed")
+            val st = stops(12 + seed % 9, seed, maxOptions = 3)
+            val nn = heuristicRoute(st, origin, twoOpt = false, orOpt = false, repick = false).meters
+            // Each local search only accepts shorter routes; they may stop at different local optima.
+            for (res in listOf(
+                heuristicRoute(st, origin, twoOpt = true, orOpt = false, repick = false),
+                heuristicRoute(st, origin, twoOpt = false, orOpt = true, repick = false),
+                heuristicRoute(st, origin, twoOpt = false, orOpt = false, repick = true),
+                heuristicRoute(st, origin),
+            )) assertTrue(res.meters <= nn + 1e-6, "seed $seed")
         }
     }
 
     @Test
     fun `free start is never worse than any fixed first place`() {
-        val pts = points(7, 3)
-        val free = exactRoute(pts, null).meters
-        for (i in pts.indices) assertTrue(free <= exactRoute(pts.filterIndexed { j, _ -> j != i }, pts[i]).meters + 1e-6)
+        val pts = List(7) { near(Random(it)) }
+        val free = exactRoute(stopsOf(pts), null).meters
+        for (i in pts.indices) assertTrue(free <= exactRoute(stopsOf(pts.filterIndexed { j, _ -> j != i }), pts[i]).meters + 1e-6)
     }
 
     @Test
     fun `small inputs`() {
-        assertEquals(RouteResult(emptyList(), 0.0), shortestRoute(emptyList(), origin))
-        assertEquals(listOf(0), shortestRoute(listOf(origin), null).order)
-        assertEquals(0.0, shortestRoute(listOf(origin), null).meters)
-        val two = shortestRoute(points(2, 9), null)
-        assertEquals(2, two.order.size)
+        assertEquals(RouteResult(emptyList(), emptyList(), 0.0), shortestRoute(emptyList(), origin))
+        val one = shortestRoute(stopsOf(listOf(origin)), null)
+        assertEquals(listOf(0), one.order)
+        assertEquals(0.0, one.meters)
+        assertEquals(2, shortestRoute(stops(2, 9), null).order.size)
     }
 
     @Test
     fun `duplicate points are fine`() {
-        val pts = listOf(origin, origin, Coords(origin.latitude + 0.002, origin.longitude), origin)
-        val r = exactRoute(pts, null)
+        val far = Coords(origin.latitude + 0.002, origin.longitude)
+        val st = stopsOf(listOf(origin, origin, far, origin))
+        val r = exactRoute(st, null)
         assertEquals(4, r.order.size)
-        assertEquals(distanceMeters(origin, pts[2]), r.meters, 1e-6)
-        assertEquals(r.meters, heuristicRoute(pts, null).meters, 1e-6)
+        assertEquals(distanceMeters(origin, far), r.meters, 1e-6)
+        assertEquals(r.meters, heuristicRoute(st, null).meters, 1e-6)
     }
 
     @Test
     fun `shortest route switches to the heuristic above EXACT_MAX`() {
-        val big = points(EXACT_MAX + 5, 11)
+        val big = stops(EXACT_MAX + 5, 11)
         assertEquals(heuristicRoute(big, origin).meters, shortestRoute(big, origin).meters, 1e-6)
-        val small = points(EXACT_MAX, 11)
+        val small = stops(EXACT_MAX, 11)
         assertEquals(exactRoute(small, origin).meters, shortestRoute(small, origin).meters, 1e-6)
     }
 
@@ -158,22 +177,24 @@ class RouteTest {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `./gradlew :app:testDebugUnitTest --tests "*RouteTest*" --console=plain -q 2>&1 | grep "^e:" | head -3`
-Expected: `Unresolved reference 'exactRoute'` (and the other new names).
+Expected: `Unresolved reference 'Stop'` / `'exactRoute'`.
 
 - [ ] **Step 3: Write the implementation**
 
 ```kotlin
 /**
- * Shortest walking order through a neighborhood's saved places: an open-path traveling salesman
- * problem (start somewhere, visit every place once, no return). Straight-line distances.
+ * Shortest walking order through a neighborhood: a generalized traveling salesman problem on an
+ * open path (start somewhere, no return). Every stop is visited once, at exactly one of its
+ * options: a saved place has one option, a coupon brand has its nearby branches, and the route
+ * picks the branch that keeps the walk shortest. With one option per stop this is the plain TSP.
+ * Straight-line distances. g = stops, N = options in total.
  *
- * - [bruteForceRoute]: every order, O(n!). Ground truth for tests and the benchmark only.
- * - [exactRoute]: Held-Karp dynamic programming over (visited set, last place), O(n²·2ⁿ) time,
- *   O(n·2ⁿ) memory. Exact.
- * - [heuristicRoute]: nearest neighbor, then 2-opt (reverse a stretch) and Or-opt (move 1–3 places)
- *   until nothing improves. Roughly O(n²) per pass, not guaranteed optimal.
- * - [mstLowerBound]: a minimum spanning tree is never longer than any open path through the same
- *   points, so it bounds how far from optimal a heuristic route can be without knowing the optimum.
+ * - [bruteForceRoute]: every stop order × every pick. Ground truth for tests and the benchmark only.
+ * - [exactRoute]: Held-Karp DP over (visited stops bitmask, last option). O(2^g·N²) time, O(2^g·N) memory.
+ * - [heuristicRoute]: nearest neighbor, then alternate (a) 2-opt / Or-opt on the stop order and
+ *   (b) re-picking every stop's option for that order by a layered shortest path, until neither helps.
+ * - [lowerBound]: MST over stops where two stops are as far apart as their closest options; no path
+ *   through one option per stop can be shorter, so it bounds the heuristic's gap without the optimum.
  *
  * [EXACT_MAX] (picked by RouteBench, see docs/route.md) decides which one the app uses.
  */
@@ -181,179 +202,226 @@ package com.capstone.snapspot.core
 
 import kotlin.math.ceil
 
-/** Up to this many places the app solves exactly; above it, the heuristic. */
+/** Up to this many stops the app solves exactly; above it, the heuristic. */
 const val EXACT_MAX = 10
 
 /** Streets are not straight: walked distance ≈ straight distance × this. */
 const val DETOUR_FACTOR = 1.3
 const val WALK_M_PER_MIN = 70.0
 
-/** `order` indexes into the input points; `meters` includes the leg from the start, if any. */
-data class RouteResult(val order: List<Int>, val meters: Double)
+/** The options for one stop: one for a saved place, several for a coupon brand's branches. */
+typealias Stop = List<Coords>
+
+/** `order[i]`: stop index; `picks[i]`: the option chosen in that stop. `meters` includes the leg from the start. */
+data class RouteResult(val order: List<Int>, val picks: List<Int>, val meters: Double)
 
 fun walkMinutes(meters: Double): Int = ceil(meters * DETOUR_FACTOR / WALK_M_PER_MIN).toInt()
 
-/** Distances between points; index n is the start when there is one. */
-private class Dist(points: List<Coords>, start: Coords?) {
-    val n = points.size
-    private val all = points + listOfNotNull(start)
+fun stopsOf(points: List<Coords>): List<Stop> = points.map { listOf(it) }
+
+/** Options flattened to node ids; node n is the start when there is one. */
+private class Graph(stops: List<Stop>, start: Coords?) {
+    val g = stops.size
+    val offset = IntArray(g + 1).also { for (i in 0 until g) it[i + 1] = it[i] + stops[i].size }
+    val n = offset[g]
+    val stopOf = IntArray(n).also { for (s in 0 until g) for (k in offset[s] until offset[s + 1]) it[k] = s }
+    private val all = stops.flatten() + listOfNotNull(start)
     private val d = Array(all.size) { i -> DoubleArray(all.size) { j -> distanceMeters(all[i], all[j]) } }
     val hasStart = start != null
     operator fun get(i: Int, j: Int) = d[i][j]
-    /** Cost of reaching `first` from the start (0 without a start). */
-    fun lead(first: Int) = if (hasStart) d[n][first] else 0.0
-    fun length(order: List<Int>): Double =
-        if (order.isEmpty()) 0.0 else lead(order[0]) + order.zipWithNext().sumOf { (a, b) -> d[a][b] }
+    fun lead(node: Int) = if (hasStart) d[n][node] else 0.0
+    fun length(nodes: List<Int>): Double =
+        if (nodes.isEmpty()) 0.0 else lead(nodes[0]) + nodes.zipWithNext().sumOf { (a, b) -> d[a][b] }
+    fun result(nodes: List<Int>) = RouteResult(nodes.map { stopOf[it] }, nodes.map { it - offset[stopOf[it]] }, length(nodes))
+    fun nodesOf(stop: Int) = offset[stop] until offset[stop + 1]
 }
 
-fun bruteForceRoute(points: List<Coords>, start: Coords?): RouteResult {
-    val dist = Dist(points, start)
+fun bruteForceRoute(stops: List<Stop>, start: Coords?): RouteResult {
+    if (stops.isEmpty()) return RouteResult(emptyList(), emptyList(), 0.0)
+    val gr = Graph(stops, start)
     var best: List<Int> = emptyList()
     var bestLen = Double.MAX_VALUE
-    fun permute(prefix: MutableList<Int>, left: MutableSet<Int>, len: Double) {
+    val path = mutableListOf<Int>()
+    val used = BooleanArray(gr.g)
+    fun go(len: Double) {
         if (len >= bestLen) return
-        if (left.isEmpty()) {
-            best = prefix.toList()
+        if (path.size == gr.g) {
+            best = path.toList()
             bestLen = len
             return
         }
-        for (next in left.toList()) {
-            val add = if (prefix.isEmpty()) dist.lead(next) else dist[prefix.last(), next]
-            prefix += next
-            left -= next
-            permute(prefix, left, len + add)
-            left += next
-            prefix.removeAt(prefix.size - 1)
+        for (s in 0 until gr.g) {
+            if (used[s]) continue
+            used[s] = true
+            for (v in gr.nodesOf(s)) {
+                val add = if (path.isEmpty()) gr.lead(v) else gr[path.last(), v]
+                path += v
+                go(len + add)
+                path.removeAt(path.size - 1)
+            }
+            used[s] = false
         }
     }
-    if (points.isEmpty()) return RouteResult(emptyList(), 0.0)
-    permute(mutableListOf(), points.indices.toMutableSet(), 0.0)
-    return RouteResult(best, bestLen)
+    go(0.0)
+    return gr.result(best)
 }
 
-fun exactRoute(points: List<Coords>, start: Coords?): RouteResult {
-    val n = points.size
-    if (n == 0) return RouteResult(emptyList(), 0.0)
-    val dist = Dist(points, start)
-    val full = (1 shl n) - 1
-    // cost[mask * n + last]: shortest path visiting exactly `mask`, ending at `last`.
-    val cost = DoubleArray((1 shl n) * n) { Double.MAX_VALUE }
-    val prev = IntArray((1 shl n) * n) { -1 }
-    for (i in 0 until n) cost[(1 shl i) * n + i] = dist.lead(i)
+fun exactRoute(stops: List<Stop>, start: Coords?): RouteResult {
+    if (stops.isEmpty()) return RouteResult(emptyList(), emptyList(), 0.0)
+    val gr = Graph(stops, start)
+    val n = gr.n
+    val full = (1 shl gr.g) - 1
+    // cost[mask * n + v]: shortest path through exactly the stops in `mask`, ending at option v.
+    val cost = DoubleArray((full + 1) * n) { Double.MAX_VALUE }
+    val prev = IntArray((full + 1) * n) { -1 }
+    for (v in 0 until n) cost[(1 shl gr.stopOf[v]) * n + v] = gr.lead(v)
     for (mask in 1..full) {
-        for (last in 0 until n) {
-            if (mask and (1 shl last) == 0) continue
-            val here = cost[mask * n + last]
+        for (v in 0 until n) {
+            val here = cost[mask * n + v]
             if (here == Double.MAX_VALUE) continue
-            for (next in 0 until n) {
-                if (mask and (1 shl next) != 0) continue
-                val m2 = mask or (1 shl next)
-                val c = here + dist[last, next]
-                if (c < cost[m2 * n + next]) {
-                    cost[m2 * n + next] = c
-                    prev[m2 * n + next] = last
+            for (u in 0 until n) {
+                val bit = 1 shl gr.stopOf[u]
+                if (mask and bit != 0) continue
+                val m2 = mask or bit
+                val c = here + gr[v, u]
+                if (c < cost[m2 * n + u]) {
+                    cost[m2 * n + u] = c
+                    prev[m2 * n + u] = v
                 }
             }
         }
     }
-    var last = (0 until n).minBy { cost[full * n + it] }
-    val len = cost[full * n + last]
-    val order = ArrayDeque<Int>()
+    var v = (0 until n).minBy { cost[full * n + it] }
+    val nodes = ArrayDeque<Int>()
     var mask = full
-    while (last >= 0) {
-        order.addFirst(last)
-        val p = prev[mask * n + last]
-        mask = mask xor (1 shl last)
-        last = p
+    while (v >= 0) {
+        nodes.addFirst(v)
+        val p = prev[mask * n + v]
+        mask = mask xor (1 shl gr.stopOf[v])
+        v = p
     }
-    return RouteResult(order.toList(), len)
+    return gr.result(nodes.toList())
 }
 
-fun heuristicRoute(points: List<Coords>, start: Coords?, twoOpt: Boolean = true, orOpt: Boolean = true): RouteResult {
-    val n = points.size
-    if (n == 0) return RouteResult(emptyList(), 0.0)
-    val dist = Dist(points, start)
-    // With a start, one run from it; without, every place as the first one and keep the best.
-    val firsts = if (start != null) listOf(-1) else (0 until n).toList()
+fun heuristicRoute(stops: List<Stop>, start: Coords?, twoOpt: Boolean = true, orOpt: Boolean = true, repick: Boolean = true): RouteResult {
+    if (stops.isEmpty()) return RouteResult(emptyList(), emptyList(), 0.0)
+    val gr = Graph(stops, start)
+    // With a start, one run from it; without, every option as the first one and keep the best.
+    val firsts = if (start != null) listOf(-1) else (0 until gr.n).toList()
     var best: List<Int> = emptyList()
     var bestLen = Double.MAX_VALUE
     for (first in firsts) {
-        val order = nearestNeighbor(dist, first)
-        improve(dist, order, twoOpt, orOpt)
-        val len = dist.length(order)
+        val nodes = nearestNeighbor(gr, first)
+        improve(gr, nodes, twoOpt, orOpt, repick)
+        val len = gr.length(nodes)
         if (len < bestLen) {
-            best = order.toList()
+            best = nodes.toList()
             bestLen = len
         }
     }
-    return RouteResult(best, bestLen)
+    return gr.result(best)
 }
 
-/** `first` = -1: start from the start point. */
-private fun nearestNeighbor(dist: Dist, first: Int): MutableList<Int> {
-    val left = (0 until dist.n).toMutableSet()
-    val order = mutableListOf<Int>()
+/** `first` = -1: from the start point. Next is always the nearest option of a stop not yet visited. */
+private fun nearestNeighbor(gr: Graph, first: Int): MutableList<Int> {
+    val visited = BooleanArray(gr.g)
+    val nodes = mutableListOf<Int>()
     if (first >= 0) {
-        order += first
-        left -= first
+        nodes += first
+        visited[gr.stopOf[first]] = true
     }
-    while (left.isNotEmpty()) {
-        val next = if (order.isEmpty()) left.minBy { dist.lead(it) } else left.minBy { dist[order.last(), it] }
-        order += next
-        left -= next
+    while (nodes.size < gr.g) {
+        val next = (0 until gr.n).filter { !visited[gr.stopOf[it]] }
+            .minBy { if (nodes.isEmpty()) gr.lead(it) else gr[nodes.last(), it] }
+        nodes += next
+        visited[gr.stopOf[next]] = true
     }
-    return order
+    return nodes
 }
 
-/** Applies 2-opt and Or-opt moves in place until neither shortens the route. */
-private fun improve(dist: Dist, order: MutableList<Int>, twoOpt: Boolean, orOpt: Boolean) {
-    // The first place is free to change only with a start point; without one, every run fixes its own first.
-    val lo = if (dist.hasStart) 0 else 1
+/** Alternates order moves (2-opt, Or-opt) and option re-picking until nothing shortens the route. */
+private fun improve(gr: Graph, nodes: MutableList<Int>, twoOpt: Boolean, orOpt: Boolean, repick: Boolean) {
+    // Without a start point each run fixes its own first stop; with one, every position may move.
+    val lo = if (gr.hasStart) 0 else 1
     var improved = true
     while (improved) {
         improved = false
         if (twoOpt) {
-            for (i in lo until order.size - 1) for (k in i + 1 until order.size) {
-                val before = dist.length(order)
-                order.subList(i, k + 1).reverse()
-                if (dist.length(order) < before - 1e-9) improved = true else order.subList(i, k + 1).reverse()
+            for (i in lo until nodes.size - 1) for (k in i + 1 until nodes.size) {
+                val before = gr.length(nodes)
+                nodes.subList(i, k + 1).reverse()
+                if (gr.length(nodes) < before - 1e-9) improved = true else nodes.subList(i, k + 1).reverse()
             }
         }
         if (orOpt) {
             for (len in 1..3) {
                 var i = lo
-                while (i + len <= order.size) {
-                    val before = dist.length(order)
-                    val seg = order.subList(i, i + len).toList()
-                    repeat(len) { order.removeAt(i) }
+                while (i + len <= nodes.size) {
+                    val before = gr.length(nodes)
+                    val seg = nodes.subList(i, i + len).toList()
+                    repeat(len) { nodes.removeAt(i) }
                     var bestPos = -1
                     var bestLen = before - 1e-9
-                    for (pos in lo..order.size) {
-                        order.addAll(pos, seg)
-                        val l = dist.length(order)
+                    for (pos in lo..nodes.size) {
+                        nodes.addAll(pos, seg)
+                        val l = gr.length(nodes)
                         if (l < bestLen) {
                             bestLen = l
                             bestPos = pos
                         }
-                        repeat(len) { order.removeAt(pos) }
+                        repeat(len) { nodes.removeAt(pos) }
                     }
                     if (bestPos >= 0) {
-                        order.addAll(bestPos, seg)
+                        nodes.addAll(bestPos, seg)
                         improved = true
                     } else {
-                        order.addAll(i, seg)
+                        nodes.addAll(i, seg)
                     }
                     i++
                 }
             }
         }
+        if (repick && repickOptions(gr, nodes)) improved = true
     }
 }
 
-/** Prim's minimum spanning tree over the points (and the start). */
-fun mstLowerBound(points: List<Coords>, start: Coords?): Double {
-    val all = points + listOfNotNull(start)
+/**
+ * For the current stop order, the best option in every stop at once: a shortest path through a
+ * layered graph (layer i = the options of the i-th stop). O(Σ kᵢ·kᵢ₊₁). True if it shortened the route.
+ */
+private fun repickOptions(gr: Graph, nodes: MutableList<Int>): Boolean {
+    if (nodes.isEmpty()) return false
+    val before = gr.length(nodes)
+    val layers = nodes.map { gr.nodesOf(gr.stopOf[it]).toList() }
+    var cost: Map<Int, Double> = layers[0].associateWith { gr.lead(it) }
+    val back = mutableListOf<Map<Int, Int>>()
+    for (i in 1 until layers.size) {
+        val next = HashMap<Int, Double>()
+        val from = HashMap<Int, Int>()
+        for (u in layers[i]) {
+            val v = cost.keys.minBy { cost.getValue(it) + gr[it, u] }
+            next[u] = cost.getValue(v) + gr[v, u]
+            from[u] = v
+        }
+        cost = next
+        back += from
+    }
+    var u = cost.keys.minBy { cost.getValue(it) }
+    if (cost.getValue(u) >= before - 1e-9) return false
+    val picked = ArrayDeque<Int>().apply { addFirst(u) }
+    for (i in back.indices.reversed()) {
+        u = back[i].getValue(u)
+        picked.addFirst(u)
+    }
+    for (i in nodes.indices) nodes[i] = picked[i]
+    return true
+}
+
+/** Prim's MST over stops (plus the start), two stops as far apart as their closest options. */
+fun lowerBound(stops: List<Stop>, start: Coords?): Double {
+    val all = stops + listOfNotNull(start).map { listOf(it) }
     if (all.size < 2) return 0.0
+    fun gap(a: Stop, b: Stop) = a.minOf { p -> b.minOf { q -> distanceMeters(p, q) } }
     val inTree = BooleanArray(all.size)
     val best = DoubleArray(all.size) { Double.MAX_VALUE }
     best[0] = 0.0
@@ -362,27 +430,27 @@ fun mstLowerBound(points: List<Coords>, start: Coords?): Double {
         val u = all.indices.filter { !inTree[it] }.minBy { best[it] }
         inTree[u] = true
         total += best[u]
-        for (v in all.indices) if (!inTree[v]) best[v] = minOf(best[v], distanceMeters(all[u], all[v]))
+        for (v in all.indices) if (!inTree[v]) best[v] = minOf(best[v], gap(all[u], all[v]))
     }
     return total
 }
 
-fun shortestRoute(points: List<Coords>, start: Coords?): RouteResult =
-    if (points.size <= EXACT_MAX) exactRoute(points, start) else heuristicRoute(points, start)
+fun shortestRoute(stops: List<Stop>, start: Coords?): RouteResult =
+    if (stops.size <= EXACT_MAX) exactRoute(stops, start) else heuristicRoute(stops, start)
 ```
 
-Note on `improve`: `dist.length(order)` is O(n) per move, which makes a pass O(n³). It is simple and correct; Task 3's benchmark measures it. If the benchmark shows the heuristic over 50ms at n = 20, replace the length recomputation with the usual O(1) delta formulas and keep these tests.
+Note on `improve`: `gr.length(nodes)` is O(g) per move, so a pass is O(g³). It is simple and correct; Task 3's benchmark measures it. If the heuristic median exceeds 50ms at g = 20, switch to O(1) delta formulas and keep these tests.
 
 - [ ] **Step 4: Run tests**
 
 Run: `./gradlew :app:testDebugUnitTest --tests "*RouteTest*" --console=plain -q; grep -o 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*"' app/build/test-results/testDebugUnitTest/TEST-com.capstone.snapspot.core.RouteTest.xml`
-Expected: `tests="8" skipped="0" failures="0"`
+Expected: `tests="9" skipped="0" failures="0"`
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add app/src/main/java/com/capstone/snapspot/core/Route.kt app/src/test/java/com/capstone/snapspot/core/RouteTest.kt
-git commit -m "feat(core): shortest walking route (Held-Karp, 2-opt/Or-opt, MST bound)"
+git commit -m "feat(core): shortest walking route as a generalized TSP (Held-Karp, 2-opt/Or-opt + re-pick, MST bound)"
 ```
 
 ---
@@ -579,7 +647,7 @@ git commit -m "feat(core): neighborhood bundles, region display names and bundle
 - Create (generated): `docs/route.md`, `docs/route/time.svg`, `docs/route/gap.svg`
 
 **Interfaces:**
-- Consumes: Task 1 functions; `SimData`, `SIM_BRANDS` not needed; `sim/seoul.json` via the same loader as `SimulateWindow` (`places` with `hood`, `lat`, `lng`).
+- Consumes: Task 1 functions (`Stop`, `stopsOf`, `exactRoute`, `heuristicRoute`, `bruteForceRoute`, `lowerBound`); `SimData`, `SIM_BRANDS` from `sim/FetchSimData.kt`; `sim/seoul.json` (`places` with `hood`, `lat`, `lng`; `branches` per brand key).
 - Produces: `lineChart(..., logY: Boolean = false, palette: Palette = Palette.ORDINAL)` and `enum class Palette { ORDINAL, CATEGORICAL }` in `SvgChart.kt`.
 
 - [ ] **Step 1: Extend `SvgChart.kt`**
@@ -632,7 +700,10 @@ import com.capstone.snapspot.core.EXACT_MAX
 import com.capstone.snapspot.core.bruteForceRoute
 import com.capstone.snapspot.core.exactRoute
 import com.capstone.snapspot.core.heuristicRoute
-import com.capstone.snapspot.core.mstLowerBound
+import com.capstone.snapspot.core.Stop
+import com.capstone.snapspot.core.distanceMeters
+import com.capstone.snapspot.core.lowerBound
+import com.capstone.snapspot.core.stopsOf
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
@@ -646,7 +717,9 @@ private const val BRUTE_MAX = 9
 private const val HELD_KARP_MAX = 16
 private const val BUDGET_MS = 50.0
 
-private class Case(val points: List<Coords>, val start: Coords)
+private class Case(val points: List<Coords>, val start: Coords) {
+    val stops: List<Stop> get() = stopsOf(points)
+}
 
 private fun cases(n: Int): List<Case> {
     val text = RouteBench::class.java.classLoader!!.getResource("sim/seoul.json")!!.readText()
@@ -675,23 +748,24 @@ class RouteBench {
         data class Row(val n: Int, val brute: Double?, val hk: Double?, val heur: Double, val gapNn: Double, val gap2: Double, val gapAll: Double, val vsMst: Boolean)
         val rows = NS.map { n ->
             val cs = cases(n)
-            val brute = if (n <= BRUTE_MAX) timeMs(cs) { bruteForceRoute(it.points, it.start) } else null
-            val hk = if (n <= HELD_KARP_MAX) timeMs(cs) { exactRoute(it.points, it.start) } else null
-            val heur = timeMs(cs) { heuristicRoute(it.points, it.start) }
+            val brute = if (n <= BRUTE_MAX) timeMs(cs) { bruteForceRoute(it.stops, it.start) } else null
+            val hk = if (n <= HELD_KARP_MAX) timeMs(cs) { exactRoute(it.stops, it.start) } else null
+            val heur = timeMs(cs) { heuristicRoute(it.stops, it.start) }
             // Gap against the optimum when Held-Karp can give it (n ≤ 12), else against the MST lower bound (an upper bound on the gap).
             val vsMst = n > 12
             fun gap(f: (Case) -> Double) = cs.map { c ->
-                val ref = if (vsMst) mstLowerBound(c.points, c.start) else exactRoute(c.points, c.start).meters
+                val ref = if (vsMst) lowerBound(c.stops, c.start) else exactRoute(c.stops, c.start).meters
                 100 * (f(c) / ref - 1)
             }.average()
             Row(
                 n, brute, hk, heur,
-                gap { heuristicRoute(it.points, it.start, twoOpt = false, orOpt = false).meters },
-                gap { heuristicRoute(it.points, it.start, twoOpt = true, orOpt = false).meters },
-                gap { heuristicRoute(it.points, it.start).meters },
+                gap { heuristicRoute(it.stops, it.start, twoOpt = false, orOpt = false).meters },
+                gap { heuristicRoute(it.stops, it.start, twoOpt = true, orOpt = false).meters },
+                gap { heuristicRoute(it.stops, it.start).meters },
                 vsMst,
             )
         }
+        val coupons = couponExperiment()
         val cutoff = rows.filter { it.hk != null && it.hk <= BUDGET_MS }.maxOf { it.n }
         fun ms(v: Double?) = v?.let { String.format(Locale.US, if (it < 1) "%.3f" else "%.1f", it) } ?: "–"
         fun pc(v: Double) = String.format(Locale.US, "%.1f%%", v)
@@ -716,7 +790,7 @@ class RouteBench {
                 Series("+ Or-opt", 2, rows.map { it.gapAll }),
             ),
         )
-        val md = routeDoc(table, cutoff)
+        val md = routeDoc(table, cutoff, coupons)
         println(md)
         if (System.getProperty("route.write") == "true") {
             val out = File(requireNotNull(System.getProperty("route.out")))
@@ -729,7 +803,46 @@ class RouteBench {
     }
 }
 
-private fun routeDoc(table: String, cutoff: Int) = """## 동네 묶음 최단 경로
+/**
+ * Coupon stops: 5–8 places in one neighborhood plus 1–2 brands whose real branches lie within 500m
+ * of a place (up to 8 per brand). Naive = take each brand's branch nearest the places' center, then
+ * solve the plain route; GTSP = let the exact route pick the branch. Returns the markdown table.
+ */
+private fun couponExperiment(): String {
+    val text = RouteBench::class.java.classLoader!!.getResource("sim/seoul.json")!!.readText()
+    val data = Json { ignoreUnknownKeys = true }.decodeFromString(SimData.serializer(), text)
+    val byHood = data.places.groupBy { it.hood }.values.toList()
+    val brands = SIM_BRANDS.map { (_, key) -> data.branches.getValue(key).map { Coords(it.lat, it.lng) } }
+    val r = Random(20261014)
+    data class Trial(val saving: Double, val naiveMs: Double, val gtspMs: Double, val brands: Int)
+    val trials = mutableListOf<Trial>()
+    while (trials.size < 60) {
+        val places = byHood[r.nextInt(byHood.size)].shuffled(r).take(5 + r.nextInt(4)).map { Coords(it.lat, it.lng) }
+        val center = Coords(places.map { it.latitude }.average(), places.map { it.longitude }.average())
+        val nearBrands = brands.map { b -> b.filter { br -> places.any { distanceMeters(it, br) <= 500 } }.sortedBy { distanceMeters(center, it) }.take(8) }
+            .filter { it.size >= 2 }.shuffled(r).take(1 + r.nextInt(2))
+        if (nearBrands.isEmpty()) continue
+        val start = Coords(center.latitude + (r.nextDouble() - 0.5) * 0.004, center.longitude + (r.nextDouble() - 0.5) * 0.005)
+        var naive = 0.0
+        var t = System.nanoTime()
+        naive = exactRoute(stopsOf(places + nearBrands.map { it.first() }), start).meters
+        val naiveMs = (System.nanoTime() - t) / 1e6
+        t = System.nanoTime()
+        val gtsp = exactRoute(stopsOf(places) + nearBrands, start).meters
+        val gtspMs = (System.nanoTime() - t) / 1e6
+        trials += Trial(100 * (1 - gtsp / naive), naiveMs, gtspMs, nearBrands.size)
+    }
+    fun f(v: Double) = String.format(Locale.US, "%.1f", v)
+    return buildString {
+        appendLine("| 쿠폰 브랜드 수 | 경우 | 지점 선택 최적화로 줄어든 거리 (평균) | 최대 | 단순 방법 (ms, 중앙값) | 지점 선택 최적화 (ms, 중앙값) |")
+        appendLine("|---|---|---|---|---|---|")
+        for ((k, ts) in trials.groupBy { it.brands }.toSortedMap()) {
+            appendLine("| $k | ${ts.size} | ${f(ts.map { it.saving }.average())}% | ${f(ts.maxOf { it.saving })}% | ${f(ts.map { it.naiveMs }.sorted()[ts.size / 2])} | ${f(ts.map { it.gtspMs }.sorted()[ts.size / 2])} |")
+        }
+    }
+}
+
+private fun routeDoc(table: String, cutoff: Int, coupons: String) = """## 동네 묶음 최단 경로
 
 동네 묶음의 걷기 동선은 **출발점이 있고 돌아오지 않는 외판원 문제(Open-path TSP)**예요. 모든 장소를 한 번씩 들르는 가장 짧은 순서를 찾아요.
 
@@ -737,12 +850,12 @@ private fun routeDoc(table: String, cutoff: Int) = """## 동네 묶음 최단 �
 
 ### 알고리즘
 
-| 방법 | 시간 복잡도 | 정확도 | 앱에서 쓰는 곳 |
+| 방법 | 시간 복잡도 (g = 들를 곳 수, N = 후보 수) | 정확도 | 앱에서 쓰는 곳 |
 |---|---|---|---|
-| 완전 탐색 | O(n!) | 최적 | 테스트에서 정답 확인용 |
-| **Held-Karp 동적 계획법** | O(n²·2ⁿ), 메모리 O(n·2ⁿ) | 최적 | 장소 ${EXACT_MAX}곳 이하 |
-| **가까운 곳부터 잇기 + 2-opt + Or-opt** | 한 바퀴 O(n³) (구현), 몇 바퀴 반복 | 근사 | 장소 ${EXACT_MAX + 1}곳 이상 |
-| 최소 신장 트리(MST, Prim) | O(n²) | 하한 | 근사의 오차 상한 계산 |
+| 완전 탐색 | O(g!·∏kᵢ) | 최적 | 테스트에서 정답 확인용 |
+| **Held-Karp 동적 계획법** | O(2^g·N²), 메모리 O(2^g·N) (쿠폰 없으면 O(n²·2ⁿ)) | 최적 | 들를 곳 ${EXACT_MAX}곳 이하 |
+| **가까운 곳부터 잇기 + 2-opt + Or-opt + 지점 다시 고르기** | 한 바퀴 O(g³ + Σkᵢkᵢ₊₁) (구현), 몇 바퀴 반복 | 근사 | ${EXACT_MAX + 1}곳 이상 |
+| 최소 신장 트리(MST, Prim) | O(g²·k²) | 하한 | 근사의 오차 상한 계산 |
 
 - **Held-Karp**: "지금까지 방문한 장소 집합(비트마스크)과 마지막 장소"를 상태로 두고, 각 상태까지의 최단 거리를 작은 집합부터 채워요. 출발점이 없으면 모든 장소를 출발 상태로 둬요.
 - **2-opt**: 경로의 한 구간을 뒤집어 엇갈린 두 선을 풀어요. **Or-opt**: 1~3곳을 떼어 다른 자리에 끼워 넣어요. 둘 다 더 줄지 않을 때까지 반복해요.
@@ -758,6 +871,13 @@ private fun routeDoc(table: String, cutoff: Int) = """## 동네 묶음 최단 �
 ![근사의 최적 대비 거리 차이](route/gap.svg)
 
 $table
+### 쿠폰 쓸 곳 포함: 지점 고르기
+
+"쿠폰 쓸 곳 포함"을 켜면 쿠폰 브랜드마다 근처 지점 중 **한 곳만** 들르면 돼요. 이건 무리마다 한 곳을 고르는 **일반화 외판원 문제(Generalized TSP)**예요. Held-Karp의 상태를 (들른 무리 집합, 마지막으로 들른 지점)으로 넓혀 O(2^g·N²)에 정확히 풀어요(g = 무리 수, N = 전체 후보 수).
+
+비교: 브랜드마다 장소들 중심에서 가장 가까운 지점을 미리 고르는 **단순 방법** 대 **지점 선택 최적화**. 동네에서 장소 5~8곳과 실제 지점(장소에서 500m 안, 브랜드마다 최대 8곳)을 60번 뽑았어요.
+
+$coupons
 ### 결론
 
 - Held-Karp가 ${BUDGET_MS.toInt()}ms 안에 끝나는 가장 큰 n은 **$cutoff**이에요. 앱의 전환 기준 `EXACT_MAX`는 $EXACT_MAX이에요.
@@ -1105,27 +1225,60 @@ git commit -m "feat(notify): one alert per neighborhood bundle"
 - Modify: `app/src/main/java/com/capstone/snapspot/ui/Nav.kt`
 
 **Interfaces:**
-- Consumes: `bundles`, `Bundle`, `fallbackBundleName` (Task 2); `shortestRoute`, `RouteResult`, `walkMinutes` (Task 1); `RegionNames.names/resolve`, `KakaoHttp.regionName` (Task 4).
-- Produces: `data class BundleItem(val bundle: Bundle, val name: String, val route: RouteResult, val start: Coords?, val minutes: Int)`; `HomeViewModel.bundles: StateFlow<List<BundleItem>>`, `openBundle: StateFlow<String?>` (bundle id), `fun toggleBundle(id: String)`, `fun openBundleFor(placeId: String)`; `MapPlace.number: Int?`; `SpotMap(route: List<Coords> = emptyList())`.
+- Consumes: `bundles`, `Bundle`, `fallbackBundleName` (Task 2); `shortestRoute`, `stopsOf`, `Stop`, `RouteResult`, `walkMinutes` (Task 1); `RegionNames.names/resolve`, `KakaoHttp.regionName` (Task 4); `brandGroups(coupons, now)` (`core/Planner.kt`), `nearbyBranches(brand, here, api, cache, now)` (`core/Branches.kt`), `Branch` (`core/model/Models.kt`).
+- Produces: `data class CouponStop(val brand: String, val branches: List<Branch>)`; `data class BundleItem(val bundle: Bundle, val name: String, val coupons: List<CouponStop>, val route: RouteResult, val start: Coords?, val minutes: Int, val couponsFailed: Boolean)` (route stops = the bundle's places first, then one stop per coupon brand); `HomeViewModel.withCoupons: StateFlow<Set<String>>`, `fun toggleCoupons(bundleId: String)`; `HomeViewModel.bundles: StateFlow<List<BundleItem>>`, `openBundle: StateFlow<String?>` (bundle id), `fun toggleBundle(id: String)`, `fun openBundleFor(placeId: String)`; `MapPlace.number: Int?`; `SpotMap(route: List<Coords> = emptyList())`.
 
 This task is Compose/Android glue; it is verified by build and on the emulator in Task 7.
 
 - [ ] **Step 1: View model** — in `HomeViewModel.kt` add:
 
 ```kotlin
-data class BundleItem(val bundle: Bundle, val name: String, val route: RouteResult, val start: Coords?, val minutes: Int)
+data class CouponStop(val brand: String, val branches: List<Branch>)
+
+/** Route stops: the bundle's places in order, then one stop per coupon brand (any one of its branches). */
+data class BundleItem(val bundle: Bundle, val name: String, val coupons: List<CouponStop>, val route: RouteResult, val start: Coords?, val minutes: Int, val couponsFailed: Boolean)
 
     /** Start from the user only when they are in the neighborhood (within 1km of a member). */
     private val _openBundle = MutableStateFlow<String?>(null)
     val openBundle: StateFlow<String?> = _openBundle.asStateFlow()
 
-    val bundles: StateFlow<List<BundleItem>> = combine(c.repo.places, here, c.regionNames.names) { list, at, _ ->
+    /** Bundles whose "쿠폰 쓸 곳 포함" switch is on, and the branches found for them (null = the fetch failed). */
+    private val _withCoupons = MutableStateFlow<Set<String>>(emptySet())
+    val withCoupons: StateFlow<Set<String>> = _withCoupons.asStateFlow()
+    private val couponStops = MutableStateFlow<Map<String, List<CouponStop>?>>(emptyMap())
+
+    val bundles: StateFlow<List<BundleItem>> = combine(c.repo.places, here, c.regionNames.names, _withCoupons, couponStops) { list, at, _, on, found ->
         bundles(list, System.currentTimeMillis(), at).map { b ->
             val start = at?.takeIf { a -> b.places.any { distanceMeters(a, Coords(it.latitude, it.longitude)) <= 1000 } }
-            val route = shortestRoute(b.places.map { Coords(it.latitude, it.longitude) }, start)
-            BundleItem(b, c.regionNames.cached(b.center) ?: fallbackBundleName(b), route, start, walkMinutes(route.meters))
+            val coupons = if (b.id in on) found[b.id].orEmpty() else emptyList()
+            val stops: List<Stop> = stopsOf(b.places.map { Coords(it.latitude, it.longitude) }) +
+                coupons.map { cs -> cs.branches.map { Coords(it.latitude, it.longitude) } }
+            val route = shortestRoute(stops, start)
+            val failed = b.id in on && found.containsKey(b.id) && found[b.id] == null
+            BundleItem(b, c.regionNames.cached(b.center) ?: fallbackBundleName(b), coupons, route, start, walkMinutes(route.meters), failed)
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Coupon stops on/off for a bundle; on fetches each brand's branches within 500m of its places (nearest 8 to the center). */
+    fun toggleCoupons(bundleId: String) {
+        val on = bundleId !in _withCoupons.value
+        _withCoupons.value = if (on) _withCoupons.value + bundleId else _withCoupons.value - bundleId
+        if (!on) return
+        val b = bundles.value.firstOrNull { it.bundle.id == bundleId }?.bundle ?: return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val found = runCatching {
+                brandGroups(c.repo.coupons.value, now).mapNotNull { g ->
+                    val near = nearbyBranches(g.brand, b.center, c.kakao, c.branchCache, now).branches
+                        .filter { br -> b.places.any { distanceMeters(Coords(it.latitude, it.longitude), Coords(br.latitude, br.longitude)) <= 500 } }
+                        .sortedBy { distanceMeters(b.center, Coords(it.latitude, it.longitude)) }
+                        .take(8)
+                    if (near.isEmpty()) null else CouponStop(g.brand, near)
+                }
+            }.getOrNull()
+            couponStops.value = couponStops.value + (bundleId to found)
+        }
+    }
 
     fun toggleBundle(id: String) {
         _openBundle.value = if (_openBundle.value == id) null else id
@@ -1171,27 +1324,29 @@ Imports: `Bundle`, `bundles`, `fallbackBundleName`, `RouteResult`, `shortestRout
   - Imports: `com.kakao.vectormap.shape.PolylineOptions`.
 
 - [ ] **Step 3: Home screen** — in `HomeScreen.kt`:
-  - Collect `val bundleItems by vm.bundles.collectAsState()` and `val openBundle by vm.openBundle.collectAsState()`; `val open = bundleItems.firstOrNull { it.bundle.id == openBundle }`.
-  - Map inputs: when `open != null`, number the places by `open.route.order` (`number = index + 1` for members) and pass `route = listOfNotNull(open.start) + open.route.order.map { Coords(open.bundle.places[it].latitude, open.bundle.places[it].longitude) }`.
+  - Collect `val bundleItems by vm.bundles.collectAsState()`, `val openBundle by vm.openBundle.collectAsState()` and `val couponsOn by vm.withCoupons.collectAsState()`; `val open = bundleItems.firstOrNull { it.bundle.id == openBundle }`.
+  - Route stops of an open bundle: for each `i` in `open.route.order.indices`, stop `s = open.route.order[i]` and pick `k = open.route.picks[i]`; it is a place when `s < open.bundle.places.size` (`open.bundle.places[s]`), otherwise coupon brand `open.coupons[s - open.bundle.places.size]` at `branches[k]`. Build `routePoints` in that order.
+  - Map inputs: when `open != null`, give each place its route position (`number = i + 1`), add each picked coupon branch as an extra `MapPlace(id = "route-$i", at = branch coords, radiusM = 0.0, initial = brand.take(1), ended = false, selected = false, number = i + 1)` (skip drawing the radius circle when `radiusM == 0.0`), and pass `route = listOfNotNull(open.start) + routePoints`.
   - In the `Tab.PLACES` branch, before the places items:
 
 ```kotlin
                         if (bundleItems.isNotEmpty()) item {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 items(bundleItems, key = { it.bundle.id }) { b ->
-                                    BundleCard(b, open = b.bundle.id == openBundle, onClick = { vm.toggleBundle(b.bundle.id) })
+                                    BundleCard(b, open = b.bundle.id == openBundle, withCoupons = b.bundle.id in couponsOn, onClick = { vm.toggleBundle(b.bundle.id) }, onCoupons = { vm.toggleCoupons(b.bundle.id) })
                                 }
                             }
                         }
-                        val shown = if (open != null) open.route.order.map { open.bundle.places[it] } else places
+                        // Open bundle: its places in route order; coupon stops follow as one-line rows.
+                        val shown = if (open != null) open.route.order.filter { it < open.bundle.places.size }.map { open.bundle.places[it] } else places
 ```
 
-    and iterate `items(shown, key = { it.id })` instead of `places`, passing `number = open?.let { o -> o.route.order.indexOfFirst { o.bundle.places[it].id == p.id } + 1 }` to `PlaceRow` (add an optional `number: Int? = null` parameter that, when set, shows a small numbered circle before the name).
+    and iterate `items(shown, key = { it.id })` instead of `places`, passing `number = open?.let { o -> o.route.order.indexOfFirst { it < o.bundle.places.size && o.bundle.places[it].id == p.id } + 1 }` to `PlaceRow`; then, for each coupon stop in the route, an item with the text `"${i + 1}. ${branch.name} (쿠폰)"` in `SnapType.meta` (add an optional `number: Int? = null` parameter that, when set, shows a small numbered circle before the name).
   - Add:
 
 ```kotlin
 @Composable
-private fun BundleCard(b: BundleItem, open: Boolean, onClick: () -> Unit) {
+private fun BundleCard(b: BundleItem, open: Boolean, withCoupons: Boolean, onClick: () -> Unit, onCoupons: () -> Unit) {
     Column(
         Modifier.width(200.dp).clip(RoundedCornerShape(16.dp))
             .background(if (open) SnapColors.ink else SnapColors.surface)
@@ -1202,6 +1357,13 @@ private fun BundleCard(b: BundleItem, open: Boolean, onClick: () -> Unit) {
         val fg = if (open) SnapColors.surface else SnapColors.ink
         Text(b.name, style = SnapType.title, color = fg, maxLines = 1)
         Text("가 볼 곳 ${b.bundle.places.size}곳 · 걸어서 약 ${b.minutes}분", style = SnapType.meta, color = if (open) SnapColors.surface else SnapColors.muted)
+        if (open) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("쿠폰 쓸 곳 포함", style = SnapType.meta, color = fg, modifier = Modifier.weight(1f))
+                Switch(checked = withCoupons, onCheckedChange = { onCoupons() })
+            }
+            if (b.couponsFailed) Text("쿠폰 지점을 불러오지 못했어요", style = SnapType.meta, color = SnapColors.surface)
+        }
     }
 }
 ```
