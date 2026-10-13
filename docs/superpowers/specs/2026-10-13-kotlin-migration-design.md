@@ -56,7 +56,7 @@ com.capstone.snapspot
 ├─ notify/      채널 생성, 장소·쿠폰 알림, Mutex로 직렬화
 ├─ image/       Photo Picker 결과를 1024px JPEG로 줄여 앱 저장소에 복사
 └─ ui/          Compose + Navigation, ViewModel
-   ├─ theme/  map/  list/  coupons/  status/  add/  coupon/
+   ├─ theme/  home/  map/(지도 카드)  status/  add/  coupon/
 ```
 
 `core`의 각 파일은 대응하는 TS 파일의 동작을 그대로 옮긴다. 상수(가중치 0.6/0.3/0.1, `CONFIDENT = 0.7`, `MIN_AUTO_MATCH = 0.4`, `MIN_BRAND_SIMILARITY = 0.4`, `SEARCH_RADIUS_M = 2500`, `CELL_DEG = 0.01`, `CACHE_TTL = 6h`, 쿨다운 장소 6h / 브랜드 3h, `MAX_REGIONS = 90`, `BRANCH_RADIUS_M = 200`, `REFRESH_RADIUS_M = 1000`, 반경 선택지 100/200/300/500)도 바꾸지 않는다.
