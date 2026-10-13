@@ -5,6 +5,7 @@ import android.content.Context
 import com.capstone.snapspot.data.FileBranchCache
 import com.capstone.snapspot.data.Repository
 import com.capstone.snapspot.geofence.GeofenceSync
+import com.capstone.snapspot.location.LocationTracker
 import com.capstone.snapspot.net.GeminiClient
 import com.capstone.snapspot.net.KakaoHttp
 import com.capstone.snapspot.notify.AlertService
@@ -25,6 +26,7 @@ class AppContainer(ctx: Context) {
     val branchCache = FileBranchCache(dir)
     val alerts = AlertService(repo, AndroidNotifier(ctx))
     val geofenceSync = GeofenceSync(ctx, repo, kakao, branchCache)
+    val location = LocationTracker(ctx)
 }
 
 class SnapSpotApp : Application() {
