@@ -49,4 +49,14 @@ class RepositoryTest {
         repo.updateCoupons(listOf("a")) { it.copy(usedAt = 5) }
         assertEquals(mapOf("a" to 5L, "b" to null), Repository(dir).coupons.value.associate { it.id to it.usedAt })
     }
+
+    @Test
+    fun `several places are marked notified in one write`() = runTest {
+        val repo = Repository(dir)
+        repo.upsertPlace(place(id = "a"))
+        repo.upsertPlace(place(id = "b"))
+        repo.upsertPlace(place(id = "c"))
+        repo.markPlacesNotified(setOf("a", "c"), 42L)
+        assertEquals(mapOf("a" to 42L, "b" to null, "c" to 42L), Repository(dir).places.value.associate { it.id to it.lastNotifiedAt })
+    }
 }

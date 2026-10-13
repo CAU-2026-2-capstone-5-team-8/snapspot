@@ -103,6 +103,10 @@ class Repository(dir: File) {
     suspend fun markPlaceNotified(id: String, at: Long) =
         editPlaces { list -> list.map { if (it.id == id) it.copy(lastNotifiedAt = at) else it } }
 
+    /** One write for a whole neighborhood bundle alert. */
+    suspend fun markPlacesNotified(ids: Set<String>, at: Long) =
+        editPlaces { list -> list.map { if (it.id in ids) it.copy(lastNotifiedAt = at) else it } }
+
     suspend fun upsertCoupon(c: Coupon) = editCoupons { list -> listOf(c) + list.filter { it.id != c.id } }
     suspend fun removeCoupon(id: String) = editCoupons { list -> list.filter { it.id != id } }
     suspend fun updateCoupons(ids: List<String>, f: (Coupon) -> Coupon) =

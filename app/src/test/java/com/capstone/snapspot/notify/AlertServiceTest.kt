@@ -148,4 +148,14 @@ class AlertServiceTest {
         assertFalse(svc.onPlaceEnter("a"))
         assertEquals(0, notifier.shown.size)
     }
+
+    @Test
+    fun `forcing a bundle place previews the bundle alert, even on screen and cooling down`() = runTest {
+        val repo = Repository(dir)
+        val notifier = FakeNotifier()
+        val svc = AlertService(repo, notifier, onScreen = { true }, bundleName = { "성수동" }) { NOW }
+        seongsuBundle(repo, lastNotifiedC = NOW - 60_000)
+        assertTrue(svc.onPlaceEnter("a", force = true))
+        assertEquals("📍 성수동에 가 볼 곳 3곳이 있어요", notifier.shown.single().first)
+    }
 }

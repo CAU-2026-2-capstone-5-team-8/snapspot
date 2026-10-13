@@ -8,6 +8,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.ExistingWorkPolicy
 import com.capstone.snapspot.SnapSpotApp
 import com.capstone.snapspot.core.Bundle
+import com.capstone.snapspot.core.CouponFetch
+import com.capstone.snapspot.core.CouponStop
 import com.capstone.snapspot.core.Coords
 import com.capstone.snapspot.core.REFRESH_ID
 import com.capstone.snapspot.core.RouteMemo
@@ -22,10 +24,10 @@ import com.capstone.snapspot.core.fallbackBundleName
 import com.capstone.snapspot.core.followBundles
 import com.capstone.snapspot.core.isActive
 import com.capstone.snapspot.core.isUrgent
-import com.capstone.snapspot.core.model.Branch
 import com.capstone.snapspot.core.model.Coupon
 import com.capstone.snapspot.core.model.Place
 import com.capstone.snapspot.core.nearbyBranches
+import com.capstone.snapspot.core.nearbyCouponStops
 import com.capstone.snapspot.core.shortestRoute
 import com.capstone.snapspot.core.stopsOf
 import com.capstone.snapspot.core.walkMinutes
@@ -55,8 +57,6 @@ data class Perms(val notif: Boolean = false, val fg: Boolean = false, val bg: Bo
 }
 
 data class CouponItem(val coupon: Coupon, val active: Boolean, val urgent: Boolean, val nearest: Pair<String, Double>?)
-
-data class CouponStop(val brand: String, val branches: List<Branch>)
 
 /** Route stops: the bundle's places in order, then one stop per coupon brand (any one of its branches). */
 data class BundleItem(val bundle: Bundle, val name: String, val coupons: List<CouponStop>, val route: RouteResult, val start: Coords?, val minutes: Int, val couponsFailed: Boolean)
@@ -103,17 +103,17 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     /** Bundles whose "쿠폰 쓸 곳 포함" switch is on, and the branches found for them (null = the fetch failed). */
     private val _withCoupons = MutableStateFlow<Set<String>>(emptySet())
     val withCoupons: StateFlow<Set<String>> = _withCoupons.asStateFlow()
-    private val couponStops = MutableStateFlow<Map<String, List<CouponStop>?>>(emptyMap())
+    private val couponStops = MutableStateFlow<Map<String, CouponFetch>>(emptyMap())
 
     /** Start from the user only when they are in the neighborhood (within 1km of a member). */
     val bundles: StateFlow<List<BundleItem>> = combine(c.repo.places, here, c.regionNames.names, _withCoupons, couponStops) { list, at, _, on, found ->
         bundles(list, System.currentTimeMillis(), at).map { b ->
             val start = at?.takeIf { a -> b.places.any { distanceMeters(a, Coords(it.latitude, it.longitude)) <= 1000 } }
-            val coupons = if (b.id in on) found[b.id].orEmpty() else emptyList()
+            val coupons = if (b.id in on) found[b.id]?.stops.orEmpty() else emptyList()
             val stops: List<Stop> = stopsOf(b.places.map { Coords(it.latitude, it.longitude) }) +
                 coupons.map { cs -> cs.branches.map { Coords(it.latitude, it.longitude) } }
             val route = routeMemo.route(stops, start, ::shortestRoute)
-            val failed = b.id in on && found.containsKey(b.id) && found[b.id] == null
+            val failed = b.id in on && (found[b.id]?.failed ?: 0) > 0
             BundleItem(b, c.regionNames.cached(b.center) ?: fallbackBundleName(b), coupons, route, start, walkMinutes(route.meters), failed)
         }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -185,6 +185,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         lastMembers = members
     }
 
+    /** Shows the alert this bundle sends, as if entering its first stop (does not use up the real alert). */
+    fun previewBundle(id: String) = viewModelScope.launch {
+        val b = bundles.value.firstOrNull { it.bundle.id == id } ?: return@launch
+        val first = b.route.order.firstOrNull { it < b.bundle.places.size }?.let { b.bundle.places[it].id } ?: return@launch
+        c.alerts.onPlaceEnter(first, force = true)
+    }
+
     /** Coupon stops on/off for a bundle; on fetches each brand's branches within 500m of its places (nearest 8 to the center). */
     fun toggleCoupons(bundleId: String) {
         val on = bundleId !in _withCoupons.value
@@ -196,15 +203,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         val b = bundles.value.firstOrNull { it.bundle.id == bundleId }?.bundle ?: return
         viewModelScope.launch {
             val now = System.currentTimeMillis()
-            val found = runCatching {
-                brandGroups(c.repo.coupons.value, now).mapNotNull { g ->
-                    val near = nearbyBranches(g.brand, b.center, c.kakao, c.branchCache, now).branches
-                        .filter { br -> b.places.any { distanceMeters(Coords(it.latitude, it.longitude), Coords(br.latitude, br.longitude)) <= 500 } }
-                        .sortedBy { distanceMeters(b.center, Coords(it.latitude, it.longitude)) }
-                        .take(8)
-                    if (near.isEmpty()) null else CouponStop(g.brand, near)
-                }
-            }.getOrNull()
+            val brands = brandGroups(c.repo.coupons.value, now).map { it.brand }
+            val found = nearbyCouponStops(b.places, b.center, brands) { brand -> nearbyBranches(brand, b.center, c.kakao, c.branchCache, now).branches }
             couponStops.value = couponStops.value + (bundleId to found)
         }
     }
