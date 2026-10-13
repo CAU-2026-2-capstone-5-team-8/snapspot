@@ -24,7 +24,7 @@
 - 색, 글꼴, 모서리 값은 `Theme.kt` 토큰으로만 써요. 화면 파일에 `Color(0x…)`를 쓰지 않아요.
 - 뷰 모델 로직, 내비게이션, 저장 데이터 형태는 바꾸지 않아요. 예외는 Task 3의 `hereName` 흐름 하나이고, 저장 데이터 형태는 그대로예요.
 - 커밋 메시지에 Claude 표기(`Co-Authored-By: Claude…`, "Generated with Claude Code")를 넣지 않아요.
-- 카카오 키(`350b5e3f…`, `e114…`)는 `local.properties`와 `.env`에만 있어요. 커밋하지 않아요.
+- 카카오 키와 Gemini 키는 `local.properties`와 `.env`에만 있어요. 커밋하지 않아요.
 - 전체 테스트: `./gradlew :app:testDebugUnitTest --console=plain -q` / 빌드: `./gradlew :app:assembleDebug --console=plain -q`
 
 ## Review Focus
@@ -3022,7 +3022,7 @@ S=C:/Users/hasan/AppData/Local/Temp/claude/C--Users-hasan-Downloads-capstone/a3f
 ```bash
 git add -A app/src/main app/src/test README.md docs/screenshots
 git status --short   # docs/samples/, set-env.log, .superpowers/ 는 올라가지 않아야 해요
-git diff --cached | grep -E "350b5e3f|e114aba0|AIza" && echo "KEY LEAK - STOP" || echo "no keys"
+git diff --cached | grep -E "[0-9a-f]{32}|AIza" && echo "KEY LEAK - STOP" || echo "no keys"
 git commit -q -m "design: dialogs and notification accent in ink, drop pre-refresh tokens and fonts, new screenshots"
 ```
 Expected: `no keys`
