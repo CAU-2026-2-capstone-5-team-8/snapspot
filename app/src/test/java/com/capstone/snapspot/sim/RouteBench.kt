@@ -113,7 +113,7 @@ class RouteBench {
         fun ms(v: Double?) = v?.let { String.format(Locale.US, if (it < 1) "%.3f" else "%.1f", it) } ?: "–"
         fun pc(v: Double) = String.format(Locale.US, "%.1f%%", v)
         val table = buildString {
-            appendLine("| 장소 수 n | 완전 탐색 (ms) | Held-Karp (ms) | 근사 (ms) | 가까운 곳부터 잇기 | + 2-opt | + Or-opt | 비교 기준 |")
+            appendLine("| 장소 수 n | 완전 탐색 (ms) | Held-Karp (ms) | 2-opt·Or-opt (ms) | 최근접 이웃 | + 2-opt | + Or-opt | 비교 기준 |")
             appendLine("|---|---|---|---|---|---|---|---|")
             for (r in rows) appendLine("| ${r.n} | ${ms(r.brute)} | ${ms(r.hk)} | ${ms(r.heur)} | ${pc(r.gapNn)} | ${pc(r.gap2)} | ${pc(r.gapAll)} | ${if (r.vsMst) "MST 하한" else "최적 (Held-Karp)"} |")
         }
@@ -123,32 +123,32 @@ class RouteBench {
         val bruteRows = rows.filter { it.brute != null }
         val bruteLast = bruteRows.last()
         fun work(n: Int) = (1..n).fold(1.0) { a, k -> a * k } * n
-        val bruteAll = NS.filter { it > bruteLast.n }.map { n -> bruteLast.brute!! * work(n) / work(bruteLast.n) }
-        // Drawn only up to a few hours so the measured lines keep their room; the label carries the n = 20 figure.
-        val bruteEstimate = bruteAll.filter { it <= BRUTE_DRAW_MAX_MS }
+        // Drawn only up to a few hours so the measured lines keep their room.
+        val bruteEstimate = NS.filter { it > bruteLast.n }.map { n -> bruteLast.brute!! * work(n) / work(bruteLast.n) }
+            .takeWhile { it <= BRUTE_DRAW_MAX_MS }
         val timeChart = lineChart(
             title = "장소 수별 계산 시간 (PC 측정, 중앙값)", xLabel = "장소 수 n", xs = NS.map { "$it" }, yLabel = "",
             subtitle = "세로축 한 칸 = 10배. 점선은 추정(n!에 비례), 1ms 아래 엇갈림은 측정 잡음",
             series = listOf(
                 Series(
                     "완전 탐색", 0, bruteRows.map { it.brute!! },
-                    label = "완전 탐색: ${NS.last()}곳이면 약 ${duration(bruteAll.last())} (추정)", estimate = bruteEstimate,
+                    label = "완전 탐색 (추정)", estimate = bruteEstimate,
                 ),
                 Series("Held-Karp", 1, rows.filter { it.hk != null }.map { it.hk!! }),
-                Series("근사", 2, rows.map { it.heur }),
+                Series("2-opt·Or-opt", 2, rows.map { it.heur }),
             ), percent = false, logY = true, palette = Palette.CATEGORICAL, format = ::duration,
             refLine = RefLine(BUDGET_MS / DEVICE_SLOWDOWN, "PC ${(BUDGET_MS / DEVICE_SLOWDOWN).toInt()}ms = 폰 ${BUDGET_MS.toInt()}ms 한도", atStart = true),
-            split = Split(switchAt, "앱: ${EXACT_MAX}곳까지 Held-Karp", "${EXACT_MAX + 1}곳부터 근사"),
+            split = Split(switchAt, "앱: ${EXACT_MAX}곳까지 Held-Karp", "${EXACT_MAX + 1}곳부터 2-opt·Or-opt"),
         )
         val gapChart = lineChart(
-            title = "근사 경로가 정답보다 몇 % 긴가 (정답 = Held-Karp)", xLabel = "장소 수 n", xs = NS.filter { it <= HELD_KARP_MAX }.map { "$it" }, yLabel = "%",
-            subtitle = "단계를 하나씩 더해요. ②는 2-opt, ③은 Or-opt이고, 앱의 근사는 ③까지 해요",
+            title = "2-opt·Or-opt 경로가 정답보다 몇 % 긴가 (정답 = Held-Karp)", xLabel = "장소 수 n", xs = NS.filter { it <= HELD_KARP_MAX }.map { "$it" }, yLabel = "%",
+            subtitle = "최근접 이웃으로 만든 경로에 2-opt, Or-opt를 차례로 더해요. 앱은 ③까지 써요",
             series = listOf(
-                Series("① 가까운 곳부터 잇기", 0, rows.filter { !it.vsMst }.map { it.gapNn }),
-                Series("② + 꼬임 풀기", 1, rows.filter { !it.vsMst }.map { it.gap2 }),
-                Series("③ + 옮겨 보기", 2, rows.filter { !it.vsMst }.map { it.gapAll }),
+                Series("① 최근접 이웃", 0, rows.filter { !it.vsMst }.map { it.gapNn }),
+                Series("② + 2-opt", 1, rows.filter { !it.vsMst }.map { it.gap2 }),
+                Series("③ + Or-opt", 2, rows.filter { !it.vsMst }.map { it.gapAll }),
             ),
-            split = Split(switchAt, "앱은 정답 사용", "근사 사용"),
+            split = Split(switchAt, "앱은 정답 사용", "2-opt·Or-opt 사용"),
         )
         val md = routeDoc(table, cutoff, coupons)
         println(md)
@@ -214,8 +214,8 @@ private fun routeDoc(table: String, cutoff: Int, coupons: String) = """## 동네
 |---|---|---|---|
 | 완전 탐색 | O(g!·∏kᵢ) | 최적 | 테스트에서 정답 확인용 |
 | **Held-Karp 동적 계획법** | O(2^g·N²), 메모리 O(2^g·N) (쿠폰 없으면 O(n²·2ⁿ)) | 최적 | 들를 곳 ${EXACT_MAX}곳 이하 |
-| **가까운 곳부터 잇기 + 2-opt + Or-opt + 지점 다시 고르기** | 한 바퀴 O(g³ + Σkᵢkᵢ₊₁) (구현), 몇 바퀴 반복 | 근사 | ${EXACT_MAX + 1}곳 이상 |
-| 최소 신장 트리(MST, Prim) | O(g²·k²) | 하한 | 정답을 구할 수 없을 만큼 클 때 근사의 오차 상한 계산 |
+| **최근접 이웃 + 2-opt + Or-opt + 지점 다시 고르기** | 한 바퀴 O(g³ + Σkᵢkᵢ₊₁) (구현), 몇 바퀴 반복 | 보장 없음 (휴리스틱) | ${EXACT_MAX + 1}곳 이상 |
+| 최소 신장 트리(MST, Prim) | O(g²·k²) | 하한 | 정답을 구할 수 없을 만큼 클 때 휴리스틱의 오차 상한 계산 |
 
 #### 각 방법을 쉽게 말하면
 
@@ -224,12 +224,12 @@ private fun routeDoc(table: String, cutoff: Int, coupons: String) = """## 동네
 - **완전 탐색**: 가능한 순서(A→B→C→D, A→B→D→C, …)를 전부 재 보고 가장 짧은 걸 골라요. 답은 확실하지만 순서의 수가 n!이라 한 곳 늘 때마다 대략 n배 느려져요. 그래서 앱에서는 안 쓰고, 다른 방법이 맞는 답을 내는지 확인하는 정답지로만 써요.
 - **Held-Karp 동적 계획법**: "A, B, C를 들렀고 지금 C에 있다"처럼 **상황이 같은 경로는 짧은 것 하나만 기억**해요. S→A→B→C와 S→B→A→C는 앞으로 갈 길이 똑같으니 긴 쪽은 버려요. 그래서 순서 전체(n!) 대신 "들른 곳 집합 × 지금 위치"(2ⁿ·n칸)만 채우면 돼요. 정확한 답을 주지만 2ⁿ으로 늘어서 ${EXACT_MAX}곳까지만 써요.
   - 쿠폰 지점이 있으면 집합은 브랜드 단위로 체크하고, "지금 위치"는 실제 지점으로 둬요. 그래서 순서와 들를 지점을 한 번에 정해요.
-- **근사** (${EXACT_MAX + 1}곳 이상). 정답을 보장하지 않는 대신 빨라요. 아래 그래프의 ①②③이 이 단계들이에요.
-  - **① 가까운 곳부터 잇기**: 지금 위치에서 가장 가까운 안 간 곳으로 계속 가요. 빠르지만 10% 정도 길게 나와요.
-  - **② 꼬임 풀기 (2-opt)**: 동선에 X자로 엇갈린 두 선이 있으면 그 사이 구간을 뒤집어 풀어요. 엇갈린 선을 풀면 항상 짧아져요.
-  - **③ 옮겨 보기 (Or-opt)**: 1~3곳을 떼어 동선의 다른 자리에 끼워 보고, 짧아지면 옮겨요.
+- **2-opt·Or-opt 휴리스틱** (${EXACT_MAX + 1}곳 이상). 정답을 보장하지 않는 대신 빨라요(그래서 "근사 알고리즘"이 아니라 휴리스틱이에요). 아래 그래프의 ①②③이 이 단계들이에요.
+  - **① 최근접 이웃 (Nearest Neighbor)**: 지금 위치에서 가장 가까운 안 간 곳으로 계속 가요. 빠르지만 10% 정도 길게 나와요.
+  - **② 2-opt**: 동선에 X자로 엇갈린 두 선이 있으면 그 사이 구간을 뒤집어 풀어요. 엇갈린 선을 풀면 항상 짧아져요.
+  - **③ Or-opt**: 1~3곳을 떼어 동선의 다른 자리에 끼워 보고, 짧아지면 옮겨요.
   - **지점 다시 고르기**: 순서를 정해 둔 채로 브랜드마다 어느 지점이 가장 짧은지 다시 골라요. ②, ③과 이 단계를 더 줄지 않을 때까지 번갈아 해요.
-- **MST 하한**: 모든 장소를 선으로 잇는 가장 짧은 방법(최소 신장 트리)이에요. 한 줄로 잇는 동선도 "모두 이은 모양"의 하나라서 어떤 동선도 이보다 짧을 수 없어요. 정답을 구할 수 없는 큰 n에서 "근사가 최대 몇 % 길다"를 재는 바닥으로 써요. 이번 측정은 20곳까지 Held-Karp로 정답을 구할 수 있어서 쓰지 않았어요.
+- **MST 하한**: 모든 장소를 선으로 잇는 가장 짧은 방법(최소 신장 트리)이에요. 한 줄로 잇는 동선도 "모두 이은 모양"의 하나라서 어떤 동선도 이보다 짧을 수 없어요. 정답을 구할 수 없는 큰 n에서 "휴리스틱이 최대 몇 % 길다"를 재는 바닥으로 써요. 이번 측정은 20곳까지 Held-Karp로 정답을 구할 수 있어서 쓰지 않았어요.
 
 ### 실험
 
@@ -238,7 +238,7 @@ private fun routeDoc(table: String, cutoff: Int, coupons: String) = """## 동네
 - 거리 차이: ${if (HELD_KARP_MAX >= NS.last()) "모든 n에서 Held-Karp 최적해와 비교한 평균이에요." else "n ≤ ${HELD_KARP_MAX}는 Held-Karp 최적해와 비교한 평균. 그보다 크면 MST 하한과 비교한 값이라 실제 차이보다 큰 **상한**이에요(MST 하한은 최적보다 보통 15~20% 짧아요)."}
 
 ![장소 수별 실행 시간](route/time.svg)
-![근사의 최적 대비 거리 차이](route/gap.svg)
+![2-opt·Or-opt의 최적 대비 거리 차이](route/gap.svg)
 
 $table
 ### 쿠폰 쓸 곳 포함: 지점 고르기
