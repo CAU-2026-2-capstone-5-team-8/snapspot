@@ -43,3 +43,12 @@ yarn-error.*
 # secrets
 .env
 /android
+
+# Kotlin/Gradle
+.gradle/
+/build
+/app/build
+local.properties
+.kotlin/
+.idea/
+*.iml
