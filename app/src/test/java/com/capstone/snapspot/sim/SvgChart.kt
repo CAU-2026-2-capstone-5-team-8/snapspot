@@ -15,8 +15,18 @@ import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.pow
 
-/** `shade`: palette slot 0..2. */
-class Series(val name: String, val shade: Int, val values: List<Double>)
+/**
+ * `shade`: palette slot 0..2. `label`: the direct label at the line's end, instead of "name value".
+ * `labelAbove`: put that label above the last point, ending there (for a line that stops mid-plot and would
+ * otherwise label across the lines to its right).
+ */
+class Series(val name: String, val shade: Int, val values: List<Double>, val label: String? = null, val labelAbove: Boolean = false)
+
+/** A dashed horizontal guide at `value` (a threshold), labeled at the plot's right edge. */
+class RefLine(val value: Double, val label: String)
+
+/** A dashed vertical divider between x index `after` and `after + 1`, with a label on each side. */
+class Split(val after: Int, val left: String, val right: String)
 
 enum class Palette(val light: List<String>, val dark: List<String>) {
     ORDINAL(listOf("#86b6ef", "#2a78d6", "#104281"), listOf("#184f95", "#3987e5", "#9ec5f4")),
@@ -53,6 +63,10 @@ fun lineChart(
     percent: Boolean = true,
     logY: Boolean = false,
     palette: Palette = Palette.ORDINAL,
+    /** One line under the title, e.g. how to read the axis. */
+    subtitle: String? = null,
+    refLine: RefLine? = null,
+    split: Split? = null,
 ): String {
     val all = series.flatMap { it.values }
     if (logY) require(all.all { it > 0 }) { "log axis needs positive values" }
@@ -71,13 +85,16 @@ fun lineChart(
         if (percent) { lo = lo.coerceAtLeast(0.0); hi = hi.coerceAtMost(100.0) }
     }
     if (hi <= lo) hi = lo + step
-    // Room on the right for the longest direct label.
-    val right = max(MIN_RIGHT, series.maxOf { (textW("${it.name} ${num(it.values.last(), percent)}") + 18).toInt() })
+    fun endLabel(s: Series) = s.label ?: "${s.name} ${num(s.values.last(), percent)}"
+    // Room on the right for the labels of lines that run to the last x (shorter lines label inside the plot).
+    val right = max(MIN_RIGHT, series.filter { it.values.size == xs.size }.maxOfOrNull { (textW(endLabel(it)) + 18).toInt() } ?: 0)
+    val top = TOP + if (subtitle != null) 18 else 0
+    val legendY = if (subtitle != null) 56 else 38
     val plotW = W - LEFT - right
-    val plotH = H - TOP - BOTTOM
+    val plotH = H - top - BOTTOM
     fun px(i: Int) = LEFT + if (xs.size == 1) plotW / 2.0 else plotW * i / (xs.size - 1).toDouble()
-    fun py(v: Double) = TOP + plotH * (1 - (tr(v) - lo) / (hi - lo))
-    fun pyRaw(t: Double) = TOP + plotH * (1 - (t - lo) / (hi - lo))
+    fun py(v: Double) = top + plotH * (1 - (tr(v) - lo) / (hi - lo))
+    fun pyRaw(t: Double) = top + plotH * (1 - (t - lo) / (hi - lo))
     fun f(v: Double) = String.format(Locale.US, "%.1f", v)
     val lightCss = seriesCss(palette.light)
     val darkCss = seriesCss(palette.dark)
@@ -95,12 +112,13 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
         )
         append("""<rect class="bg" width="$W" height="$H" rx="8"/>""")
         append("""<text class="t1" x="$LEFT" y="26" font-size="15" font-weight="600">${esc(title)}</text>""")
+        subtitle?.let { append("""<text class="t2" x="$LEFT" y="44" font-size="12">${esc(it)}</text>""") }
         // Legend for two or more series, in series order.
         if (series.size >= 2) {
             var lx = LEFT.toDouble()
             for (s in series) {
-                append("""<rect class="m${s.shade}" x="${f(lx)}" y="38" width="12" height="3" rx="1.5"/>""")
-                append("""<text class="t2" x="${f(lx + 16)}" y="43" font-size="12">${esc(s.name)}</text>""")
+                append("""<rect class="m${s.shade}" x="${f(lx)}" y="$legendY" width="12" height="3" rx="1.5"/>""")
+                append("""<text class="t2" x="${f(lx + 16)}" y="${legendY + 5}" font-size="12">${esc(s.name)}</text>""")
                 lx += 30 + textW(s.name)
             }
         }
@@ -114,7 +132,19 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
             t += step
         }
         append("""<line class="axis" x1="$LEFT" x2="${LEFT + plotW}" y1="${f(pyRaw(lo))}" y2="${f(pyRaw(lo))}" stroke-width="1"/>""")
-        append("""<text class="t2" x="${LEFT - 8}" y="${TOP - 10}" font-size="11" text-anchor="end">${esc(yLabel)}</text>""")
+        append("""<text class="t2" x="${LEFT - 8}" y="${top - 10}" font-size="11" text-anchor="end">${esc(yLabel)}</text>""")
+        // Guides sit under the data: a threshold across, a divider down.
+        refLine?.let { r ->
+            val y = py(r.value)
+            append("""<line class="axis" x1="$LEFT" x2="${LEFT + plotW}" y1="${f(y)}" y2="${f(y)}" stroke-width="1" stroke-dasharray="4 4"/>""")
+            append("""<text class="t2" x="${LEFT + plotW - 4}" y="${f(y - 6)}" font-size="11" text-anchor="end">${esc(r.label)}</text>""")
+        }
+        split?.let { sp ->
+            val x = (px(sp.after) + px(sp.after + 1)) / 2
+            append("""<line class="axis" x1="${f(x)}" x2="${f(x)}" y1="$top" y2="${f(pyRaw(lo))}" stroke-width="1" stroke-dasharray="4 4"/>""")
+            append("""<text class="t2" x="${f(x - 6)}" y="${top + 12}" font-size="11" text-anchor="end">${esc(sp.left)}</text>""")
+            append("""<text class="t2" x="${f(x + 6)}" y="${top + 12}" font-size="11">${esc(sp.right)}</text>""")
+        }
         // Every other x label when they would crowd.
         val every = if (xs.size > 10) 2 else 1
         xs.forEachIndexed { i, label ->
@@ -124,7 +154,7 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
         }
         append("""<text class="t2" x="${LEFT + plotW / 2}" y="${H - 10}" font-size="12" text-anchor="middle">${esc(xLabel)}</text>""")
         // Lines, then markers with a surface ring, then a direct label at the end of each line.
-        val ends = series.map { it to py(it.values.last()) }.sortedBy { it.second }
+        val ends = series.filter { !it.labelAbove }.map { it to py(it.values.last()) }.sortedBy { it.second }
         val labelY = HashMap<Series, Double>()
         var lastY = Double.NEGATIVE_INFINITY
         for ((s, y) in ends) {
@@ -138,8 +168,12 @@ text{font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR'
             s.values.forEachIndexed { i, value ->
                 append("""<circle class="m${s.shade} ring" cx="${f(px(i))}" cy="${f(py(value))}" r="4" stroke-width="2"><title>${esc(s.name)} · ${esc(xs[i])}: ${num(value, percent)}</title></circle>""")
             }
-            val endX = px(s.values.size - 1) + 10
-            append("""<text class="t1" x="${f(endX)}" y="${f(labelY.getValue(s) + 4)}" font-size="12">${esc(s.name)} ${num(s.values.last(), percent)}</text>""")
+            val lastX = px(s.values.size - 1)
+            if (s.labelAbove) {
+                append("""<text class="t1" x="${f(lastX)}" y="${f(py(s.values.last()) - 18)}" font-size="12" text-anchor="end">${esc(endLabel(s))}</text>""")
+            } else {
+                append("""<text class="t1" x="${f(lastX + 10)}" y="${f(labelY.getValue(s) + 4)}" font-size="12">${esc(endLabel(s))}</text>""")
+            }
         }
         append("</svg>")
     }
