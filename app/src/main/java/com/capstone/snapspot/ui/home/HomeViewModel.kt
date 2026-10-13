@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -74,6 +75,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         refreshPerms()
+        // The map starts wherever it can; once the first position arrives, go there unless something else was focused.
+        viewModelScope.launch {
+            val at = here.filterNotNull().first()
+            if (_focus.value == null) _focus.value = MapFocus(at, System.nanoTime(), 15)
+        }
         // In-app watcher: alerts while the app is open, even before background permission.
         viewModelScope.launch {
             here.filterNotNull().collect { at ->

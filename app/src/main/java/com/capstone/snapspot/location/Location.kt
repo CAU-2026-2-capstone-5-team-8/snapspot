@@ -51,9 +51,14 @@ class LocationTracker(private val ctx: Context) {
     suspend fun current(): Coords? {
         _here.value?.let { return it }
         if (!hasFineLocation(ctx)) return null
-        val loc = runCatching { fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await() }.getOrNull()
+        // Balanced uses Wi-Fi/cell only; with neither (no Wi-Fi, emulator) fall back to GPS once.
+        val loc = currentAt(Priority.PRIORITY_BALANCED_POWER_ACCURACY) ?: currentAt(Priority.PRIORITY_HIGH_ACCURACY)
         return loc?.let { Coords(it.latitude, it.longitude) }?.also { _here.value = it }
     }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun currentAt(priority: Int) =
+        runCatching { fused.getCurrentLocation(priority, null).await() }.getOrNull()
 }
 
 /**

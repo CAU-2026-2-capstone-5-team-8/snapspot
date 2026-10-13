@@ -126,7 +126,7 @@ fun AddScreen(vm: AddViewModel, onClose: () -> Unit, onSaved: (kind: String, id:
         is SaveResult.DuplicatePlace -> AlertDialog(
             onDismissRequest = { duplicate = null },
             title = { Text("이미 저장한 장소예요", style = SnapType.title) },
-            text = { Text("지도에 있는 '${dup.existing.name}'과 같은 곳이에요. 같은 장소는 한 번만 저장돼서 알림도 한 번만 와요.", style = SnapType.body) },
+            text = { Text("${dup.existing.name}\n같은 장소는 한 번만 저장돼서 알림도 한 번만 와요.", style = SnapType.body) },
             confirmButton = { TextButton(onClick = { duplicate = null; vm.cancel(); onOpenPlace(dup.existing.id) }) { Text("기존 것 보기", color = SnapColors.green, fontWeight = FontWeight.Bold) } },
             dismissButton = { TextButton(onClick = { duplicate = null }) { Text("취소", color = SnapColors.ink) } },
             containerColor = SnapColors.surface,

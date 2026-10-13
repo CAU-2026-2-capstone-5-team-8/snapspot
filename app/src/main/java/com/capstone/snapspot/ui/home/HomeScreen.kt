@@ -160,7 +160,10 @@ fun HomeScreen(
                         }
                     }
                     if (tab == Tab.PLACES) {
-                        if (places.isEmpty()) item { Empty("스크린샷 한 장으로 시작해 보세요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요.") }
+                        if (places.isEmpty()) item {
+                            if (coupons.isEmpty()) Empty("스크린샷 한 장으로 시작해 보세요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요.")
+                            else Empty("저장한 장소가 없어요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요. 쿠폰은 쿠폰 탭에 있어요.")
+                        }
                         items(places, key = { it.id }) { p ->
                             val d = here?.let { distanceMeters(it, Coords(p.latitude, p.longitude)) }
                             PlaceRow(
