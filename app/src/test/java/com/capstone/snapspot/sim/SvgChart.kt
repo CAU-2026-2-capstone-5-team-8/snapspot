@@ -4,7 +4,8 @@
  * with the dataviz validator: ORDINAL light #86b6ef/#2a78d6/#104281, dark #184f95/#3987e5/#9ec5f4
  * (ordered series: more = more contrast); CATEGORICAL light #2a78d6/#eb6834/#1baf7a, dark
  * #3987e5/#d95926/#199e70 (distinct series; aqua is 2.74:1 on light, so every line carries a direct
- * label and each report has a table).
+ * label and each report has a table). ORDINAL's slot 3 is the categorical orange, so Held-Karp keeps its color
+ * across the route charts.
  */
 package com.capstone.snapspot.sim
 
@@ -16,7 +17,7 @@ import kotlin.math.max
 import kotlin.math.pow
 
 /**
- * `shade`: palette slot 0..2. `label`: the direct label at the line's end, instead of "name value".
+ * `shade`: palette slot 0..2 (3: ORDINAL's orange). `label`: the direct label at the line's end, instead of "name value".
  * `labelBefore`: put that label left of the last point, ending there (for a line that stops mid-plot and would
  * otherwise label across the lines to its right).
  */
@@ -39,7 +40,7 @@ class RefLine(val value: Double, val label: String, val atStart: Boolean = false
 class Split(val after: Int, val left: String, val right: String)
 
 enum class Palette(val light: List<String>, val dark: List<String>) {
-    ORDINAL(listOf("#86b6ef", "#2a78d6", "#104281"), listOf("#184f95", "#3987e5", "#9ec5f4")),
+    ORDINAL(listOf("#86b6ef", "#2a78d6", "#104281", "#eb6834"), listOf("#184f95", "#3987e5", "#9ec5f4", "#d95926")),
     CATEGORICAL(listOf("#2a78d6", "#eb6834", "#1baf7a"), listOf("#3987e5", "#d95926", "#199e70")),
 }
 
