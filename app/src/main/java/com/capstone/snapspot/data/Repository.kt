@@ -3,11 +3,13 @@ package com.capstone.snapspot.data
 import com.capstone.snapspot.core.Coords
 import com.capstone.snapspot.core.model.Coupon
 import com.capstone.snapspot.core.model.Place
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -42,9 +44,12 @@ internal val storeJson = Json { ignoreUnknownKeys = true; encodeDefaults = true 
 
 /** A JSON file holding one value. Unreadable files read as `null` so a bad write cannot brick the app. */
 internal class JsonFile<T>(private val file: File, private val serializer: KSerializer<T>) {
-    fun read(): T? = runCatching { if (file.exists()) storeJson.decodeFromString(serializer, file.readText()) else null }.getOrNull()
+    /** Blocking read, for startup only; everything else goes through [read] and [write] on the IO dispatcher. */
+    fun readNow(): T? = runCatching { if (file.exists()) storeJson.decodeFromString(serializer, file.readText()) else null }.getOrNull()
 
-    fun write(value: T) {
+    suspend fun read(): T? = withContext(Dispatchers.IO) { readNow() }
+
+    suspend fun write(value: T) = withContext(Dispatchers.IO) {
         file.parentFile?.mkdirs()
         val tmp = File(file.parentFile, "${file.name}.tmp")
         tmp.writeText(storeJson.encodeToString(serializer, value))
@@ -52,6 +57,7 @@ internal class JsonFile<T>(private val file: File, private val serializer: KSeri
             file.delete()
             tmp.renameTo(file)
         }
+        Unit
     }
 }
 
@@ -66,9 +72,9 @@ class Repository(dir: File) {
     private val couponsFile = JsonFile(File(dir, "coupons.json"), ListSerializer(Coupon.serializer()))
     private val windowFile = JsonFile(File(dir, "window.json"), WindowState.serializer())
 
-    private val _places = MutableStateFlow(placesFile.read().orEmpty())
-    private val _coupons = MutableStateFlow(couponsFile.read().orEmpty())
-    private val _window = MutableStateFlow(windowFile.read())
+    private val _places = MutableStateFlow(placesFile.readNow().orEmpty())
+    private val _coupons = MutableStateFlow(couponsFile.readNow().orEmpty())
+    private val _window = MutableStateFlow(windowFile.readNow())
     val places: StateFlow<List<Place>> = _places.asStateFlow()
     val coupons: StateFlow<List<Coupon>> = _coupons.asStateFlow()
     val window: StateFlow<WindowState?> = _window.asStateFlow()

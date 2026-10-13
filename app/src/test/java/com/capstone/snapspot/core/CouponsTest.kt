@@ -70,4 +70,14 @@ class CouponsTest {
         assertEquals("오늘까지", dDay(0))
         assertEquals("D-5", dDay(5))
     }
+
+    @Test
+    fun `only real calendar dates count as dates`() {
+        assertTrue(isDate("2026-12-31"))
+        assertTrue(isDate("2028-02-29"))
+        assertFalse(isDate("2026-02-30"))
+        assertFalse(isDate("2026-13-01"))
+        assertFalse(isDate("2026-1-5"))
+        assertFalse(isDate(null))
+    }
 }

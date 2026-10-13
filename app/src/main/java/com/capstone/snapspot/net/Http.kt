@@ -15,7 +15,8 @@ internal val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 internal suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
     cont.invokeOnCancellation { cancel() }
     enqueue(object : Callback {
-        override fun onResponse(call: Call, response: Response) = cont.resume(response)
+        // Cancelled while the response arrived: close it so the connection goes back to the pool.
+        override fun onResponse(call: Call, response: Response) = cont.resume(response) { _, r, _ -> r.close() }
         override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)
     })
 }

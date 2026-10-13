@@ -45,9 +45,11 @@ class GeofenceSync(
         PendingIntent.getBroadcast(ctx, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
     }
 
+    /** With no fix yet (cold start, indoors), plans around the last planned position instead of dropping the branches and the refresh region. */
     @SuppressLint("MissingPermission")
     suspend fun sync(here: Coords?): SyncResult = lock.withLock {
-        val r = buildWindow(here, repo.places.value, repo.coupons.value, api, cache, clock())
+        val at = here ?: repo.window.value?.here
+        val r = buildWindow(at, repo.places.value, repo.coupons.value, api, cache, clock())
         repo.saveWindow(r.state)
         if (!hasFineLocation(ctx) || !hasBackgroundLocation(ctx)) {
             return@withLock SyncResult(r.plan, false, "위치 권한이 \"항상 허용\"이 아니에요")

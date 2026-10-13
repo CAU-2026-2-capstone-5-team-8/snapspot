@@ -109,6 +109,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { c.repo.reload() }
     }
 
+    /** Out of sight, geofences take over; continuous updates would only drain the battery. */
+    fun onStop() = c.location.stop()
+
     fun resync() {
         viewModelScope.launch { _sync.value = c.geofenceSync.sync(here.value) }
     }

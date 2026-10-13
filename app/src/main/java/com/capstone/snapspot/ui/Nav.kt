@@ -56,10 +56,17 @@ fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit, shared: List<Uri>
     var missingKey by remember { mutableStateOf(false) }
     var askedOnce by rememberSaveable { mutableStateOf(false) }
 
-    // Re-check permissions and reload data written by background work whenever the app comes back.
+    // Re-check permissions and reload data written by background work whenever the app comes back;
+    // stop following the position while it is out of sight.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
-        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) home.onResume() }
+        val obs = LifecycleEventObserver { _, e ->
+            when (e) {
+                Lifecycle.Event.ON_RESUME -> home.onResume()
+                Lifecycle.Event.ON_STOP -> home.onStop()
+                else -> Unit
+            }
+        }
         lifecycle.addObserver(obs)
         onDispose { lifecycle.removeObserver(obs) }
     }

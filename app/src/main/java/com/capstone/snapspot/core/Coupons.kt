@@ -17,7 +17,8 @@ const val URGENT_DAYS = 3
 
 private val DATE = Regex("""^\d{4}-\d{2}-\d{2}$""")
 
-fun isDate(s: String?): Boolean = s != null && DATE.matches(s)
+/** YYYY-MM-DD that exists on the calendar (2026-02-30 does not). */
+fun isDate(s: String?): Boolean = s != null && DATE.matches(s) && runCatching { LocalDate.parse(s) }.isSuccess
 
 /** The last millisecond of `date` (YYYY-MM-DD) in the device time zone, or null when unparsable. */
 fun endOfDay(date: String): Long? = runCatching {
