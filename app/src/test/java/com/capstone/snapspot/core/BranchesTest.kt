@@ -45,4 +45,11 @@ class BranchesTest {
         val r = nearbyBranches("스타벅스", here, k, MemoryBranchCache(), now = 0)
         assertEquals(3, r.requests)
     }
+
+    @Test
+    fun `a branch repeated across pages is kept once`() = runTest {
+        val full = (0 until 15).map { "스타벅스 $it" to "음식점 > 카페 > 커피전문점 > 스타벅스" }.toTypedArray()
+        val r = nearbyBranches("스타벅스", here, FakeKakao(any = docs(*full)), MemoryBranchCache(), now = 0)
+        assertEquals(15, r.branches.size)
+    }
 }

@@ -72,7 +72,7 @@ suspend fun nearbyBranches(brand: String, here: Coords, api: KakaoApi, cache: Br
         docs += batch
         if (batch.size < PAGE_SIZE) break
     }
-    val branches = pickBranches(brand, docs).map {
+    val branches = pickBranches(brand, docs.distinctBy { it.id }).map {
         Branch(it.id, it.place_name, it.road_address_name.ifEmpty { it.address_name }, it.y.toDouble(), it.x.toDouble())
     }
     cache.set(cacheKey, CachedBranches(now, branches))
