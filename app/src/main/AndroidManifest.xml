@@ -32,6 +32,13 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="snapspot" />
             </intent-filter>
+            <!-- Screenshots shared from other apps go straight into the add flow. -->
+            <intent-filter android:label="SnapSpot에 저장">
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
         </activity>
 
         <receiver

@@ -40,7 +40,46 @@ data class Draft(
     val matched: Candidate? = null,
     val candidates: List<Candidate> = emptyList(),
     val radius: Int = 200,
+    /** Why reading failed; shown when this screenshot's turn comes, not while another is on screen. */
+    val readError: String? = null,
 )
+
+/** At most this many screenshots at once: each one is a Gemini call. */
+const val MAX_BATCH = 10
+
+/** Screenshots confirmed one at a time, in order. Ones after the current are read ahead in the background. */
+data class Batch(
+    val drafts: List<Draft>,
+    val index: Int = 0,
+    val places: Int = 0,
+    val coupons: Int = 0,
+    /** Tells a late background read which batch it belongs to. */
+    val id: Long = 0,
+) {
+    val current: Draft? get() = drafts.getOrNull(index)
+    val total: Int get() = drafts.size
+    /** 1-based, for "2 / 5". */
+    val position: Int get() = index + 1
+    val done: Boolean get() = index >= drafts.size
+
+    /** Move on after saving a "place" or "coupon", or skipping (null). */
+    fun next(saved: String?) = copy(
+        index = index + 1,
+        places = places + if (saved == "place") 1 else 0,
+        coupons = coupons + if (saved == "coupon") 1 else 0,
+    )
+
+    fun updateAt(i: Int, f: (Draft) -> Draft): Batch =
+        if (i !in drafts.indices) this else copy(drafts = drafts.toMutableList().also { it[i] = f(it[i]) })
+}
+
+fun batchSummary(b: Batch): String {
+    val parts = listOfNotNull(
+        "장소 ${b.places}곳".takeIf { b.places > 0 },
+        "쿠폰 ${b.coupons}장".takeIf { b.coupons > 0 },
+    )
+    return if (parts.isEmpty()) "저장한 것이 없어요" else parts.joinToString(", ") + "을 저장했어요"
+}
 
 data class Located(val coords: Coords?, val matched: Candidate?, val candidates: List<Candidate>)
 

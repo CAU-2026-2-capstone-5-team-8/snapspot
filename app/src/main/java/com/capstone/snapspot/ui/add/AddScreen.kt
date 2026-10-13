@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,18 +70,41 @@ import com.capstone.snapspot.ui.theme.SnapType
 import kotlinx.coroutines.launch
 
 @Composable
-fun AddScreen(vm: AddViewModel, onClose: () -> Unit, onSaved: (kind: String, id: String) -> Unit, onOpenPlace: (String) -> Unit, onOpenCoupon: (String) -> Unit) {
+fun AddScreen(
+    vm: AddViewModel,
+    onClose: () -> Unit,
+    onSaved: (kind: String, id: String) -> Unit,
+    onFinished: (summary: String) -> Unit,
+    onOpenPlace: (String) -> Unit,
+    onOpenCoupon: (String) -> Unit,
+) {
+    val batch by vm.batch.collectAsState()
     val draft by vm.draft.collectAsState()
     val error by vm.error.collectAsState()
     val scope = rememberCoroutineScope()
     var duplicate by remember { mutableStateOf<SaveResult?>(null) }
+
+    // Several screenshots: after the last one, go back with a summary.
+    LaunchedEffect(batch?.done) {
+        val b = batch ?: return@LaunchedEffect
+        if (b.done && b.total > 1) {
+            onFinished(batchSummary(b))
+            vm.cancel()
+        }
+    }
+
+    val b = batch ?: return
     val d = draft ?: return
+    val many = b.total > 1
     val ready = d.stage == Stage.READY
     val isCoupon = d.kind == "coupon"
 
     fun save(allowDuplicate: Boolean = false) = scope.launch {
         when (val r = vm.save(allowDuplicate)) {
-            is SaveResult.Saved -> onSaved(r.kind, r.id)
+            is SaveResult.Saved -> if (!many) {
+                vm.cancel()
+                onSaved(r.kind, r.id)
+            }
             is SaveResult.DuplicatePlace, is SaveResult.DuplicateCoupon -> duplicate = r
             SaveResult.NotReady -> Unit
         }
@@ -89,6 +113,7 @@ fun AddScreen(vm: AddViewModel, onClose: () -> Unit, onSaved: (kind: String, id:
     Column(Modifier.fillMaxSize().background(SnapColors.paper).statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(if (!ready) "스크린샷 읽는 중" else if (isCoupon) "새 쿠폰 확인" else "새 장소 확인", style = SnapType.title, modifier = Modifier.weight(1f))
+            if (many) Text("${b.position} / ${b.total}", style = SnapType.label, color = SnapColors.muted, modifier = Modifier.padding(end = 12.dp))
             Box(Modifier.size(40.dp).clip(CircleShape).background(SnapColors.surface).clickable { vm.cancel(); onClose() }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.Close, contentDescription = "닫기", tint = SnapColors.ink)
             }
@@ -102,23 +127,27 @@ fun AddScreen(vm: AddViewModel, onClose: () -> Unit, onSaved: (kind: String, id:
             }
             Column(Modifier.fillMaxWidth().background(SnapColors.paper)) {
                 HorizontalDivider(color = SnapColors.line)
-                PrimaryButton(
-                    if (isCoupon) "쿠폰함에 저장" else "지도에 저장",
-                    onClick = { save() },
-                    enabled = if (isCoupon) d.brand.isNotBlank() else d.coords != null,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-                )
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (many) SecondaryButton("건너뛰기", onClick = vm::skip)
+                    PrimaryButton(
+                        if (isCoupon) "쿠폰함에 저장" else "지도에 저장",
+                        onClick = { save() },
+                        enabled = if (isCoupon) d.brand.isNotBlank() else d.coords != null,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     }
 
-    error?.let { msg ->
+    (error ?: d.readError)?.let { msg ->
+        val dismiss = { if (error != null) vm.clearError() else vm.clearReadError() }
         val (title, body) = msg.split("\n", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
         AlertDialog(
-            onDismissRequest = vm::clearError,
+            onDismissRequest = dismiss,
             title = { Text(title, style = SnapType.title) },
             text = { Text(body, style = SnapType.body) },
-            confirmButton = { TextButton(onClick = vm::clearError) { Text("확인", color = SnapColors.green) } },
+            confirmButton = { TextButton(onClick = dismiss) { Text("확인", color = SnapColors.green) } },
             containerColor = SnapColors.surface,
         )
     }
@@ -127,7 +156,11 @@ fun AddScreen(vm: AddViewModel, onClose: () -> Unit, onSaved: (kind: String, id:
             onDismissRequest = { duplicate = null },
             title = { Text("이미 저장한 장소예요", style = SnapType.title) },
             text = { Text("${dup.existing.name}\n같은 장소는 한 번만 저장돼서 알림도 한 번만 와요.", style = SnapType.body) },
-            confirmButton = { TextButton(onClick = { duplicate = null; vm.cancel(); onOpenPlace(dup.existing.id) }) { Text("기존 것 보기", color = SnapColors.green, fontWeight = FontWeight.Bold) } },
+            confirmButton = {
+                // Mid-batch, "see the existing one" would throw away the screenshots still waiting.
+                if (many) TextButton(onClick = { duplicate = null; vm.skip() }) { Text("건너뛰기", color = SnapColors.green, fontWeight = FontWeight.Bold) }
+                else TextButton(onClick = { duplicate = null; vm.cancel(); onOpenPlace(dup.existing.id) }) { Text("기존 것 보기", color = SnapColors.green, fontWeight = FontWeight.Bold) }
+            },
             dismissButton = { TextButton(onClick = { duplicate = null }) { Text("취소", color = SnapColors.ink) } },
             containerColor = SnapColors.surface,
         )
@@ -138,7 +171,8 @@ fun AddScreen(vm: AddViewModel, onClose: () -> Unit, onSaved: (kind: String, id:
             confirmButton = {
                 Row {
                     TextButton(onClick = { duplicate = null; save(allowDuplicate = true) }) { Text("그래도 추가", color = SnapColors.ink) }
-                    TextButton(onClick = { duplicate = null; vm.cancel(); onOpenCoupon(dup.existing.id) }) { Text("기존 것 보기", color = SnapColors.green, fontWeight = FontWeight.Bold) }
+                    if (many) TextButton(onClick = { duplicate = null; vm.skip() }) { Text("건너뛰기", color = SnapColors.green, fontWeight = FontWeight.Bold) }
+                    else TextButton(onClick = { duplicate = null; vm.cancel(); onOpenCoupon(dup.existing.id) }) { Text("기존 것 보기", color = SnapColors.green, fontWeight = FontWeight.Bold) }
                 }
             },
             dismissButton = { TextButton(onClick = { duplicate = null }) { Text("취소", color = SnapColors.muted) } },

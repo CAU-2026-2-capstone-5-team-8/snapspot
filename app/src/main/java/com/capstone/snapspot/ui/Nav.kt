@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,6 +34,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.capstone.snapspot.ui.add.AddScreen
 import com.capstone.snapspot.ui.add.AddViewModel
+import com.capstone.snapspot.ui.add.MAX_BATCH
 import com.capstone.snapspot.ui.coupon.CouponScreen
 import com.capstone.snapspot.ui.home.HomeScreen
 import com.capstone.snapspot.ui.home.HomeViewModel
@@ -39,9 +42,12 @@ import com.capstone.snapspot.ui.status.StatusScreen
 import com.capstone.snapspot.ui.theme.SnapColors
 import com.capstone.snapspot.ui.theme.SnapType
 
-/** Screens: home (map + list), add, status, coupon/{id}. `deepLink` comes from tapped notifications. */
+/**
+ * Screens: home (map + list), add, status, coupon/{id}. `deepLink` comes from tapped notifications,
+ * `shared` from images other apps shared to SnapSpot.
+ */
 @Composable
-fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit) {
+fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit, shared: List<Uri>?, onSharedHandled: () -> Unit) {
     val nav = rememberNavController()
     val home: HomeViewModel = viewModel()
     val add: AddViewModel = viewModel()
@@ -88,11 +94,25 @@ fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit) {
         }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) {
-            add.start(uri)
-            nav.navigate("add")
+    fun addScreenshots(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        if (!add.hasGeminiKey()) {
+            missingKey = true
+            return
         }
+        val left = add.start(uris)
+        if (left > 0) Toast.makeText(ctx, "한 번에 ${MAX_BATCH}장까지 넣을 수 있어서 앞의 ${MAX_BATCH}장만 읽을게요.", Toast.LENGTH_LONG).show()
+        nav.navigate("add") { launchSingleTop = true }
+    }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_BATCH)) { uris ->
+        addScreenshots(uris)
+    }
+
+    LaunchedEffect(shared) {
+        val uris = shared ?: return@LaunchedEffect
+        addScreenshots(uris)
+        onSharedHandled()
     }
 
     LaunchedEffect(deepLink) {
@@ -122,12 +142,18 @@ fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit) {
             )
         }
         composable("add") {
+            // Back closes the whole batch, so screenshots still waiting are not read for nothing.
+            BackHandler { add.cancel(); nav.popBackStack() }
             AddScreen(
                 vm = add,
                 onClose = { nav.popBackStack() },
                 onSaved = { kind, id ->
                     nav.popBackStack("home", inclusive = false)
                     if (kind == "place") home.focusOn(id) else nav.navigate("coupon/$id")
+                },
+                onFinished = { summary ->
+                    nav.popBackStack("home", inclusive = false)
+                    Toast.makeText(ctx, summary, Toast.LENGTH_LONG).show()
                 },
                 onOpenPlace = { id -> nav.popBackStack("home", inclusive = false); home.focusOn(id) },
                 onOpenCoupon = { id -> nav.popBackStack("home", inclusive = false); nav.navigate("coupon/$id") },

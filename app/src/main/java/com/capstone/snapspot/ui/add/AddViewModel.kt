@@ -15,13 +15,21 @@ import com.capstone.snapspot.core.model.Branch
 import com.capstone.snapspot.core.model.Coupon
 import com.capstone.snapspot.core.model.Place
 import com.capstone.snapspot.core.nearbyBranches
+import com.capstone.snapspot.image.PreparedShot
 import com.capstone.snapspot.image.Screenshots
 import com.capstone.snapspot.location.geocodePlace
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlin.coroutines.cancellation.CancellationException
 
 sealed interface SaveResult {
@@ -31,16 +39,24 @@ sealed interface SaveResult {
     data object NotReady : SaveResult
 }
 
-/** One screenshot on its way to becoming a saved place or coupon. */
+/** Gemini + Kakao reads running at once; the rest wait their turn. */
+private const val PARALLEL_READS = 2
+
+/** Screenshots on their way to becoming saved places or coupons, confirmed one at a time. */
 class AddViewModel(app: Application) : AndroidViewModel(app) {
     private val c = (app as SnapSpotApp).container
-    private val _draft = MutableStateFlow<Draft?>(null)
-    val draft: StateFlow<Draft?> = _draft.asStateFlow()
+    private val _batch = MutableStateFlow<Batch?>(null)
+    val batch: StateFlow<Batch?> = _batch.asStateFlow()
+    /** The screenshot on screen. */
+    val draft: StateFlow<Draft?> = _batch.map { it?.current }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
     /** Shown once as a dialog, then cleared. */
     val error: StateFlow<String?> = _error.asStateFlow()
+
+    /** Reads for the current batch; cancelled when it is replaced or closed. */
+    private var reads: Job? = null
 
     val here get() = c.location.here
 
@@ -52,10 +68,13 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
         _error.value = null
     }
 
-    fun update(f: (Draft) -> Draft) = _draft.update { it?.let(f) }
+    /** Edits the screenshot on screen. */
+    fun update(f: (Draft) -> Draft) = _batch.update { b -> b?.updateAt(b.index, f) }
 
     fun cancel() {
-        _draft.value = null
+        reads?.cancel()
+        reads = null
+        _batch.value = null
     }
 
     private suspend fun doLocate(name: String, address: String, category: String) =
@@ -76,41 +95,64 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun start(uri: Uri) {
-        val base = Draft(stage = Stage.READING, kind = "place", imageUri = uri.toString())
-        _draft.value = base
-        viewModelScope.launch {
-            try {
-                val shot = Screenshots.prepare(getApplication(), uri)
-                val ex = c.gemini.extract(shot.base64Jpeg)
-                val read = base.copy(
+    /**
+     * Starts a new batch (replacing any open one) and reads every screenshot in the background,
+     * a few at a time and in order, so the next one is usually ready when its turn comes.
+     * Returns how many were left out over [MAX_BATCH].
+     */
+    fun start(uris: List<Uri>): Int {
+        cancel()
+        val taken = uris.take(MAX_BATCH)
+        if (taken.isEmpty()) return 0
+        val batch = Batch(taken.map { Draft(stage = Stage.READING, kind = "place", imageUri = it.toString()) }, id = System.nanoTime())
+        _batch.value = batch
+        val permits = Semaphore(PARALLEL_READS)
+        reads = viewModelScope.launch {
+            // Copy every image first: a shared image's read permission ends when the sender lets go.
+            val shots = taken.map { uri -> async { runCatching { Screenshots.prepare(getApplication(), uri) } } }
+            shots.forEachIndexed { i, shot ->
+                launch { permits.withPermit { read(batch, i, shot.await()) } }
+            }
+        }
+        return uris.size - taken.size
+    }
+
+    /** Updates screenshot `i`, but only while `batch` is still the open one. */
+    private fun updateAt(batch: Batch, i: Int, f: (Draft) -> Draft) =
+        _batch.update { b -> if (b?.id == batch.id) b.updateAt(i, f) else b }
+
+    private suspend fun read(batch: Batch, i: Int, prepared: Result<PreparedShot>) {
+        try {
+            val shot = prepared.getOrThrow()
+            val ex = c.gemini.extract(shot.base64Jpeg)
+            updateAt(batch, i) {
+                it.copy(
                     stage = Stage.LOCATING, imageUri = shot.fileUri, name = ex.name, address = ex.address,
                     category = ex.category, note = ex.note, endDate = ex.endDate.orEmpty(), isPlace = ex.isPlace,
                     kind = ex.kind, brand = ex.brand, benefit = ex.benefit,
                 )
-                _draft.value = read
-                if (ex.kind == "coupon") {
-                    val branches = previewBranches(ex.brand)
-                    _draft.update { d -> d?.takeIf { it.imageUri == read.imageUri }?.copy(branches = branches, stage = Stage.READY) ?: d }
-                    return@launch
-                }
-                val located = if (ex.isPlace) doLocate(ex.name, ex.address, ex.category) else Located(null, null, emptyList())
-                _draft.update { d ->
-                    d?.takeIf { it.imageUri == read.imageUri }
-                        ?.copy(coords = located.coords, matched = located.matched, candidates = located.candidates, stage = Stage.READY) ?: d
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _draft.update { it?.copy(stage = Stage.READY) }
-                _error.value = "스크린샷을 읽지 못했어요\n${e.message ?: e.javaClass.simpleName}"
             }
+            if (ex.kind == "coupon") {
+                val branches = previewBranches(ex.brand)
+                updateAt(batch, i) { it.copy(branches = branches, stage = Stage.READY) }
+                return
+            }
+            val located = if (ex.isPlace) doLocate(ex.name, ex.address, ex.category) else Located(null, null, emptyList())
+            updateAt(batch, i) {
+                it.copy(coords = located.coords, matched = located.matched, candidates = located.candidates, stage = Stage.READY)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            updateAt(batch, i) { it.copy(stage = Stage.READY, readError = "스크린샷을 읽지 못했어요\n${e.message ?: e.javaClass.simpleName}") }
         }
     }
 
+    fun clearReadError() = update { it.copy(readError = null) }
+
     /** Switching a draft between place and coupon (Gemini can guess wrong). */
     fun setKind(kind: String) {
-        val d = _draft.value ?: return
+        val d = draft.value ?: return
         if (d.kind == kind) return
         viewModelScope.launch {
             if (kind == "coupon") {
@@ -129,7 +171,7 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun regeocode() {
-        val d = _draft.value ?: return
+        val d = draft.value ?: return
         viewModelScope.launch {
             _busy.value = true
             val l = doLocate(d.name, d.address, d.category)
@@ -140,7 +182,7 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshBranchPreview() {
-        val d = _draft.value ?: return
+        val d = draft.value ?: return
         viewModelScope.launch {
             _busy.value = true
             val branches = previewBranches(d.brand)
@@ -165,9 +207,15 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Saves the draft. A duplicate is returned instead of saved unless `allowDuplicate` (coupons only). */
+    /** Moves past the screenshot on screen without saving it. */
+    fun skip() = _batch.update { it?.next(null) }
+
+    /**
+     * Saves the screenshot on screen and moves to the next one. A duplicate is returned instead of
+     * saved unless `allowDuplicate` (coupons only). Geofences follow the saved data on their own.
+     */
     suspend fun save(allowDuplicate: Boolean = false): SaveResult {
-        val d = _draft.value ?: return SaveResult.NotReady
+        val d = draft.value ?: return SaveResult.NotReady
         val now = System.currentTimeMillis()
         val result = if (d.kind == "coupon") {
             val coupon = buildCoupon(d, "c_${now.toString(36)}", now) ?: return SaveResult.NotReady
@@ -184,8 +232,7 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
             c.repo.upsertPlace(place)
             SaveResult.Saved("place", place.id)
         }
-        _draft.value = null
-        c.geofenceSync.sync(c.location.here.value)
+        _batch.update { it?.next(result.kind) }
         return result
     }
 }
