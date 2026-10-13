@@ -62,6 +62,13 @@ android {
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }
+            // ./gradlew :app:testDebugUnitTest -PuniformSim: refresh radius over evenly spread branches (prints a table).
+            if (project.hasProperty("uniformSim")) {
+                it.filter.includeTestsMatching("*UniformBranches*")
+                it.systemProperty("uniform.run", "true")
+                it.testLogging.showStandardStreams = true
+                it.outputs.upToDateWhen { false }
+            }
             // ./gradlew :app:testDebugUnitTest -ProuteBench [-ProuteWrite]: route algorithm benchmark (docs/route.md).
             if (project.hasProperty("routeBench")) {
                 it.filter.includeTestsMatching("*RouteBench*")
