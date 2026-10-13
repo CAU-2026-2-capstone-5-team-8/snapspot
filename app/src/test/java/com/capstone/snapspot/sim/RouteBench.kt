@@ -25,8 +25,17 @@ import kotlin.random.Random
 
 private const val REPEATS = 30
 private val NS = (4..20).toList()
-private const val BRUTE_MAX = 11
-private const val HELD_KARP_MAX = 16
+/** Brute force is timed up to here (fewer runs above [BRUTE_FULL_RUNS_MAX]); the chart extends it to n = 20 as an estimate. */
+private const val BRUTE_MAX = 13
+private const val HELD_KARP_MAX = 20
+/** The brute-force estimate is drawn up to about three hours. */
+private const val BRUTE_DRAW_MAX_MS = 1e7
+/**
+ * Above these n a single run takes up to seconds, so timing uses a few cases and a short warm-up. Held-Karp keeps
+ * full runs through the sizes that decide [EXACT_MAX].
+ */
+private const val BRUTE_FULL_RUNS_MAX = 11
+private const val HELD_KARP_FULL_RUNS_MAX = 16
 private const val BUDGET_MS = 50.0
 
 /** Phones run this several times slower than a desktop JVM; the cutoff keeps the phone under the budget. */
@@ -49,11 +58,26 @@ private fun cases(n: Int): List<Case> {
     }
 }
 
-/** Median wall time in ms of `f` over the cases, after warming the JIT on the first one. */
-private fun timeMs(cs: List<Case>, f: (Case) -> Unit): Double {
-    repeat(20) { f(cs[it % cs.size]) }
+/** Median wall time in ms of `f` over the cases, after `warm` runs to warm the JIT. */
+private fun timeMs(cs: List<Case>, warm: Int = 20, f: (Case) -> Unit): Double {
+    repeat(warm) { f(cs[it % cs.size]) }
     val times = cs.map { c -> val t = System.nanoTime(); f(c); (System.nanoTime() - t) / 1e6 }.sorted()
     return times[times.size / 2]
+}
+
+/** "0.01ms", "3.5ms", "1.5초", "17분", "28시간", "46일", "52년": durations a reader can feel. */
+private fun duration(ms: Double): String {
+    fun g(v: Double) = String.format(Locale.US, if (v < 10) "%.1f" else "%.0f", v).removeSuffix(".0")
+    val s = ms / 1000
+    return when {
+        ms < 1 -> String.format(Locale.US, "%.3f", ms).trimEnd('0').trimEnd('.') + "ms"
+        ms < 1000 -> g(ms) + "ms"
+        s < 60 -> g(s) + "초"
+        s < 3600 -> g(s / 60) + "분"
+        s < 48 * 3600 -> g(s / 3600) + "시간"
+        s < 365 * 86400 -> g(s / 86400) + "일"
+        else -> String.format(Locale.US, "%,.0f", s / (365 * 86400)) + "년"
+    }
 }
 
 class RouteBench {
@@ -63,10 +87,11 @@ class RouteBench {
         data class Row(val n: Int, val brute: Double?, val hk: Double?, val heur: Double, val gapNn: Double, val gap2: Double, val gapAll: Double, val vsMst: Boolean)
         val rows = NS.map { n ->
             val cs = cases(n)
-            val brute = if (n <= BRUTE_MAX) timeMs(cs) { bruteForceRoute(it.stops, it.start) } else null
-            val hk = if (n <= HELD_KARP_MAX) timeMs(cs) { exactRoute(it.stops, it.start) } else null
+            // Slow sizes: a few cases and a short warm-up keep the whole run to minutes.
+            fun time(fullUpTo: Int, f: (Case) -> Unit) = if (n <= fullUpTo) timeMs(cs, f = f) else timeMs(cs.take(5), warm = 2, f = f)
+            val brute = if (n <= BRUTE_MAX) time(BRUTE_FULL_RUNS_MAX) { bruteForceRoute(it.stops, it.start) } else null
+            val hk = if (n <= HELD_KARP_MAX) time(HELD_KARP_FULL_RUNS_MAX) { exactRoute(it.stops, it.start) } else null
             val heur = timeMs(cs) { heuristicRoute(it.stops, it.start) }
-            // Gap against the optimum when Held-Karp can give it (n ≤ 12), else against the MST lower bound (an upper bound on the gap).
             // Against the optimum while Held-Karp can give it; above that against the MST lower bound (an upper bound on the gap).
             val vsMst = n > HELD_KARP_MAX
             val refs = cs.map { c -> if (vsMst) lowerBound(c.stops, c.start) else exactRoute(c.stops, c.start).meters }
@@ -94,15 +119,25 @@ class RouteBench {
         }
         // Both charts mark where the app switches from the exact route to the heuristic.
         val switchAt = NS.indexOf(EXACT_MAX)
+        // Brute force beyond what can be timed: n!·n work, scaled from the last measured size.
+        val bruteRows = rows.filter { it.brute != null }
+        val bruteLast = bruteRows.last()
+        fun work(n: Int) = (1..n).fold(1.0) { a, k -> a * k } * n
+        val bruteAll = NS.filter { it > bruteLast.n }.map { n -> bruteLast.brute!! * work(n) / work(bruteLast.n) }
+        // Drawn only up to a few hours so the measured lines keep their room; the label carries the n = 20 figure.
+        val bruteEstimate = bruteAll.filter { it <= BRUTE_DRAW_MAX_MS }
         val timeChart = lineChart(
-            title = "장소 수별 계산 시간 (PC 측정, 중앙값)", xLabel = "장소 수 n", xs = NS.map { "$it" }, yLabel = "ms",
-            subtitle = "세로축 한 칸 = 10배 (로그 눈금). 1ms 아래의 엇갈림은 측정 잡음이에요",
+            title = "장소 수별 계산 시간 (PC 측정, 중앙값)", xLabel = "장소 수 n", xs = NS.map { "$it" }, yLabel = "",
+            subtitle = "세로축 한 칸 = 10배. 점선은 추정(n!에 비례), 1ms 아래 엇갈림은 측정 잡음",
             series = listOf(
-                Series("완전 탐색", 0, rows.filter { it.brute != null }.map { it.brute!! }, label = "완전 탐색 (${BRUTE_MAX}곳까지 측정)", labelBefore = true),
+                Series(
+                    "완전 탐색", 0, bruteRows.map { it.brute!! },
+                    label = "완전 탐색: ${NS.last()}곳이면 약 ${duration(bruteAll.last())} (추정)", estimate = bruteEstimate,
+                ),
                 Series("Held-Karp", 1, rows.filter { it.hk != null }.map { it.hk!! }),
                 Series("근사", 2, rows.map { it.heur }),
-            ), percent = false, logY = true, palette = Palette.CATEGORICAL,
-            refLine = RefLine(BUDGET_MS / DEVICE_SLOWDOWN, "PC ${(BUDGET_MS / DEVICE_SLOWDOWN).toInt()}ms = 폰 ${BUDGET_MS.toInt()}ms 한도"),
+            ), percent = false, logY = true, palette = Palette.CATEGORICAL, format = ::duration,
+            refLine = RefLine(BUDGET_MS / DEVICE_SLOWDOWN, "PC ${(BUDGET_MS / DEVICE_SLOWDOWN).toInt()}ms = 폰 ${BUDGET_MS.toInt()}ms 한도", atStart = true),
             split = Split(switchAt, "앱: ${EXACT_MAX}곳까지 Held-Karp", "${EXACT_MAX + 1}곳부터 근사"),
         )
         val gapChart = lineChart(
@@ -180,7 +215,7 @@ private fun routeDoc(table: String, cutoff: Int, coupons: String) = """## 동네
 | 완전 탐색 | O(g!·∏kᵢ) | 최적 | 테스트에서 정답 확인용 |
 | **Held-Karp 동적 계획법** | O(2^g·N²), 메모리 O(2^g·N) (쿠폰 없으면 O(n²·2ⁿ)) | 최적 | 들를 곳 ${EXACT_MAX}곳 이하 |
 | **가까운 곳부터 잇기 + 2-opt + Or-opt + 지점 다시 고르기** | 한 바퀴 O(g³ + Σkᵢkᵢ₊₁) (구현), 몇 바퀴 반복 | 근사 | ${EXACT_MAX + 1}곳 이상 |
-| 최소 신장 트리(MST, Prim) | O(g²·k²) | 하한 | 근사의 오차 상한 계산 |
+| 최소 신장 트리(MST, Prim) | O(g²·k²) | 하한 | 정답을 구할 수 없을 만큼 클 때 근사의 오차 상한 계산 |
 
 #### 각 방법을 쉽게 말하면
 
@@ -194,13 +229,13 @@ private fun routeDoc(table: String, cutoff: Int, coupons: String) = """## 동네
   - **② 꼬임 풀기 (2-opt)**: 동선에 X자로 엇갈린 두 선이 있으면 그 사이 구간을 뒤집어 풀어요. 엇갈린 선을 풀면 항상 짧아져요.
   - **③ 옮겨 보기 (Or-opt)**: 1~3곳을 떼어 동선의 다른 자리에 끼워 보고, 짧아지면 옮겨요.
   - **지점 다시 고르기**: 순서를 정해 둔 채로 브랜드마다 어느 지점이 가장 짧은지 다시 골라요. ②, ③과 이 단계를 더 줄지 않을 때까지 번갈아 해요.
-- **MST 하한**: 모든 장소를 선으로 잇는 가장 짧은 방법(최소 신장 트리)이에요. 한 줄로 잇는 동선도 "모두 이은 모양"의 하나라서 어떤 동선도 이보다 짧을 수 없어요. 정답을 구할 수 없는 큰 n에서 "근사가 최대 몇 % 길다"를 재는 바닥으로 써요.
+- **MST 하한**: 모든 장소를 선으로 잇는 가장 짧은 방법(최소 신장 트리)이에요. 한 줄로 잇는 동선도 "모두 이은 모양"의 하나라서 어떤 동선도 이보다 짧을 수 없어요. 정답을 구할 수 없는 큰 n에서 "근사가 최대 몇 % 길다"를 재는 바닥으로 써요. 이번 측정은 20곳까지 Held-Karp로 정답을 구할 수 있어서 쓰지 않았어요.
 
 ### 실험
 
 - 데이터: 실제 서울 8개 동네의 장소 160곳(`sim/seoul.json`). 동네 하나에서 n곳을 무작위로 뽑고, 출발점은 그 장소들 중심 근처의 임의 위치. n마다 ${REPEATS}번.
-- 시간: JVM 예열 후 중앙값. 완전 탐색은 n ≤ $BRUTE_MAX, Held-Karp는 n ≤ ${HELD_KARP_MAX}까지.
-- 거리 차이: n ≤ ${HELD_KARP_MAX}는 Held-Karp 최적해와 비교한 평균. 그보다 크면 MST 하한과 비교한 값이라 실제 차이보다 큰 **상한**이에요(MST 하한은 최적보다 보통 15~20% 짧아요).
+- 시간: JVM 예열 후 중앙값. 완전 탐색은 n ≤ ${BRUTE_MAX}, Held-Karp는 n ≤ ${HELD_KARP_MAX}까지 쟀어요. 한 번에 오래 걸리는 크기(완전 탐색 n > ${BRUTE_FULL_RUNS_MAX}, Held-Karp n > ${HELD_KARP_FULL_RUNS_MAX})는 사례 5개로 쟀어요. 그래프의 완전 탐색 점선(n > ${BRUTE_MAX})은 마지막 측정값에서 계산량(n!·n)에 비례해 늘린 **추정**이에요.
+- 거리 차이: ${if (HELD_KARP_MAX >= NS.last()) "모든 n에서 Held-Karp 최적해와 비교한 평균이에요." else "n ≤ ${HELD_KARP_MAX}는 Held-Karp 최적해와 비교한 평균. 그보다 크면 MST 하한과 비교한 값이라 실제 차이보다 큰 **상한**이에요(MST 하한은 최적보다 보통 15~20% 짧아요)."}
 
 ![장소 수별 실행 시간](route/time.svg)
 ![근사의 최적 대비 거리 차이](route/gap.svg)
@@ -215,6 +250,6 @@ $table
 $coupons
 ### 결론
 
-- 폰은 이 측정(데스크톱 JVM)보다 최대 ${DEVICE_SLOWDOWN.toInt()}배 느리다고 보고, 폰에서도 ${BUDGET_MS.toInt()}ms 안에 끝나도록 Held-Karp가 ${(BUDGET_MS / DEVICE_SLOWDOWN).toInt()}ms 안에 끝나는 가장 큰 n을 봤어요. 이번 측정에서는 **$cutoff**이에요. 시간 측정은 실행마다 조금씩 흔들려 이 값이 11~12를 오가서, 앱의 전환 기준 `EXACT_MAX`는 작은 쪽인 ${EXACT_MAX}로 정했어요.
+- 폰은 이 측정(데스크톱 JVM)보다 최대 ${DEVICE_SLOWDOWN.toInt()}배 느리다고 보고, 폰에서도 ${BUDGET_MS.toInt()}ms 안에 끝나도록 Held-Karp가 ${(BUDGET_MS / DEVICE_SLOWDOWN).toInt()}ms 안에 끝나는 가장 큰 n을 봤어요. 이번 측정에서는 **$cutoff**이에요. 시간 측정은 실행마다 조금씩 흔들려서 이 값도 실행마다 달라져요(지금까지 12~13). 그래서 앱의 전환 기준 `EXACT_MAX`는 여유를 두고 ${EXACT_MAX}로 정했어요.
 - 한 동네에 저장하는 장소는 보통 10곳 이하라, 대부분의 묶음은 정확한 최단 경로를 받아요.
 """
