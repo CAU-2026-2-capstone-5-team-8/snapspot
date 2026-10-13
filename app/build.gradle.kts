@@ -62,10 +62,12 @@ android {
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }
-            // ./gradlew :app:testDebugUnitTest -PuniformSim: refresh radius over evenly spread branches (prints a table).
+            // ./gradlew :app:testDebugUnitTest -PuniformSim [-PuniformWrite]: refresh radius over evenly spread branches (docs/refresh-radius.md).
             if (project.hasProperty("uniformSim")) {
                 it.filter.includeTestsMatching("*UniformBranches*")
                 it.systemProperty("uniform.run", "true")
+                it.systemProperty("uniform.write", project.hasProperty("uniformWrite").toString())
+                it.systemProperty("uniform.out", rootProject.file("docs/refresh-radius.md").absolutePath)
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }
