@@ -44,12 +44,12 @@ android {
         unitTests.isReturnDefaultValues = true
         unitTests.all {
             it.useJUnitPlatform()
-            // ./gradlew :app:testDebugUnitTest -Psim [-PsimWrite]: geofence strategy simulation (docs/simulation.md).
+            // ./gradlew :app:testDebugUnitTest -Psim [-PsimWrite]: refresh radius experiment + real-Seoul check (docs/refresh-radius.md).
             if (project.hasProperty("sim")) {
-                it.filter.includeTestsMatching("*SimulateWindow*")
+                it.filter.includeTestsMatching("*UniformBranches*")
                 it.systemProperty("sim.run", "true")
                 it.systemProperty("sim.write", project.hasProperty("simWrite").toString())
-                it.systemProperty("sim.out", rootProject.file("docs/simulation.md").absolutePath)
+                it.systemProperty("sim.out", rootProject.file("docs/refresh-radius.md").absolutePath)
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }
