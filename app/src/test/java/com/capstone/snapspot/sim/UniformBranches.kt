@@ -147,10 +147,10 @@ class UniformBranches {
         val xs = refreshes.map { km(it) }
 
         val charts = mapOf(
-            "uniform-first.svg" to lineChart(
-                title = "처음 지나간 지점에서 바로 알림이 울린 비율",
+            "uniform-missed.svg" to lineChart(
+                title = "처음 지나간 지점을 놓친 비율 (낮을수록 좋음)",
                 xLabel = "갱신 반경", xs = xs, yLabel = "%",
-                series = spreads.mapIndexed { i, sp -> Series("km²당 ${f1(density(sp))}곳", i, refreshes.map { s(sp, it).first }) },
+                series = spreads.mapIndexed { i, sp -> Series("km²당 ${f1(density(sp))}곳", i, refreshes.map { 100 - s(sp, it).first }) },
             ),
             "uniform-wakeups.svg" to lineChart(
                 title = "갱신 반경별 1km 이동당 갱신 횟수",
@@ -211,10 +211,10 @@ class UniformBranches {
 
 ### 결과
 
-![처음 지나간 지점에서 바로 알림이 울린 비율](sim/uniform-first.svg)
+![처음 지나간 지점을 놓친 비율](sim/uniform-missed.svg)
 ![갱신 반경별 1km 이동당 갱신 횟수](sim/uniform-wakeups.svg)
 
-첫 그래프의 세로축은 ${(kotlin.math.floor((spreads.minOf { sp -> refreshes.minOf { s(sp, it).first } } - 2) / 10) * 10).toInt()}%에서 시작해요. 차이를 보기 쉽게 확대한 거라, 아래 표의 실제 수치와 함께 봐 주세요.
+첫 그래프는 "처음 지나간 지점에서 알림"의 반대, 즉 **처음 지점을 놓친 비율**이에요 (100% − 알림 비율). 세로축은 0%부터 시작해요. 1km까지는 바닥에 붙어 있다가, 1km를 넘으면 지점 밀도가 평균인 곳에서 놓치는 비율이 빠르게 올라가요.
 
 ### 해석: 왜 1km인가
 
