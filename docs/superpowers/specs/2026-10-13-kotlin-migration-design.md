@@ -46,10 +46,8 @@ com.capstone.snapspot
 │  ├─ KakaoClient.kt  Local 키워드 검색(페이지네이션, 최대 3페이지)
 │  └─ GeminiClient.kt generateContent, 프롬프트·스키마는 TS와 동일
 ├─ data/
-│  ├─ db/             Room: PlaceEntity, CouponEntity, DAO
-│  ├─ WindowStore.kt  DataStore(JSON): 등록된 감시 창 상태
-│  ├─ BranchCacheStore.kt DataStore(JSON): 격자 칸별 지점 캐시(6시간)
-│  └─ Repository.kt   화면·백그라운드가 공유하는 단일 진입점
+│  ├─ Repository.kt   장소·쿠폰·감시 창 JSON 파일, 화면·백그라운드가 공유하는 단일 진입점
+│  └─ FileBranchCache.kt 격자 칸별 지점 캐시(6시간)
 ├─ geofence/
 │  ├─ GeofenceSync.kt     syncGeofences: 계획 → GeofencingClient 등록
 │  ├─ GeofenceReceiver.kt 이벤트 수신 → WorkManager 위임
@@ -71,7 +69,7 @@ com.capstone.snapspot
 | SDK | minSdk 26, target/compileSdk 최신 안정판 | Kakao Map SDK·Photo Picker 백포트 모두 충족 |
 | UI | Jetpack Compose(Material 3), Navigation Compose | |
 | 상태 | ViewModel + StateFlow | |
-| 저장 | Room(장소·쿠폰), DataStore(감시 창·지점 캐시) | 목록은 쿼리 대상, 나머지는 통째로 읽고 쓰는 값 |
+| 저장 | kotlinx.serialization JSON 파일 + Mutex (장소·쿠폰·감시 창·지점 캐시) | 구현 중 변경: 데이터가 수십 건이고 TS 앱도 통째로 읽고 썼으므로 Room/KSP 없이 같은 동작 |
 | 네트워크 | OkHttp + kotlinx.serialization | |
 | 위치 | Play Services Location: `FusedLocationProviderClient`, `GeofencingClient` | |
 | 백그라운드 | `BroadcastReceiver` + WorkManager(expedited) | 리시버 안에서 네트워크 호출을 하지 않기 위해 |
@@ -94,7 +92,7 @@ com.capstone.snapspot
 2. `GeminiClient.extract(base64)` → `Extracted`.
 3. 장소: `KakaoClient` 검색(`nameVariants`로 뒤에서부터 한 단어씩 줄이며) → `scoreCandidate` → 최고 점수가 `MIN_AUTO_MATCH` 이상이면 그 좌표, 아니면 `android.location.Geocoder` → 사용자가 확인·수정(이름, 분류, 메모, 종료일, 반경, 후보 선택).
    쿠폰: 현재 위치 근처 지점 미리보기(`nearbyBranches`).
-4. 저장 직전 `Dedup` 검사(6절) → Room에 저장 → `GeofenceSync.sync(here)`.
+4. 저장 직전 `Dedup` 검사(6절) → 저장소에 저장 → `GeofenceSync.sync(here)`.
 
 ### 5.2 백그라운드
 - `GeofencingClient`에 계획된 영역(최대 90개: 갱신 구역 1개 + 장소·지점 89개)을 등록하고, 이벤트는 `GeofenceReceiver` → `GeofenceWorker`(expedited)로 넘긴다.

@@ -42,7 +42,18 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
-        unitTests.all { it.useJUnitPlatform() }
+        unitTests.all {
+            it.useJUnitPlatform()
+            // ./gradlew :app:testDebugUnitTest -Psim [-PsimWrite]: geofence strategy simulation (docs/simulation.md).
+            if (project.hasProperty("sim")) {
+                it.filter.includeTestsMatching("*SimulateWindow*")
+                it.systemProperty("sim.run", "true")
+                it.systemProperty("sim.write", project.hasProperty("simWrite").toString())
+                it.systemProperty("sim.out", rootProject.file("docs/simulation.md").absolutePath)
+                it.testLogging.showStandardStreams = true
+                it.outputs.upToDateWhen { false }
+            }
+        }
     }
 }
 
