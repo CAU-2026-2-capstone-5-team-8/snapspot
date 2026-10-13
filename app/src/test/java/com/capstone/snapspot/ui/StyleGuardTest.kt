@@ -13,7 +13,6 @@ class StyleGuardTest {
     private val legacy = setOf(
         "MainActivity.kt",
         "ui/Nav.kt",
-        "ui/components/Components.kt",
         "ui/home/HomeScreen.kt",
         "ui/map/SpotMap.kt",
         "ui/add/AddScreen.kt",

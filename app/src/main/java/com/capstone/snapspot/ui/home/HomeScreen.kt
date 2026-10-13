@@ -61,8 +61,6 @@ import com.capstone.snapspot.core.placeEnded
 import com.capstone.snapspot.core.untilLabel
 import com.capstone.snapspot.ui.components.Card
 import com.capstone.snapspot.ui.components.Dot
-import com.capstone.snapspot.ui.components.Fact
-import com.capstone.snapspot.ui.components.NearBand
 import com.capstone.snapspot.ui.components.Notice
 import com.capstone.snapspot.ui.components.Segmented
 import com.capstone.snapspot.ui.components.Shot
@@ -368,4 +366,24 @@ private fun BundleCard(b: BundleItem, open: Boolean, withCoupons: Boolean, onCli
             }
         }
     }
+}
+
+/** Pre-refresh pieces, kept here until this screen moves over (Task 5). */
+@Composable
+private fun NearBand(text: String) {
+    Text(
+        text,
+        fontFamily = SnapFonts.display,
+        color = SnapColors.ink,
+        modifier = Modifier.fillMaxWidth().background(SnapColors.highlight).padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+private fun Fact(text: String) {
+    Text(
+        text,
+        style = SnapType.meta,
+        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(SnapColors.paper).padding(horizontal = 8.dp, vertical = 2.dp),
+    )
 }
