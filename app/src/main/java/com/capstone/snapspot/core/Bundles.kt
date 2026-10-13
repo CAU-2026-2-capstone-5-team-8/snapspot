@@ -37,7 +37,7 @@ fun bundles(places: List<Place>, now: Long, here: Coords? = null): List<Bundle> 
 fun bundleOf(places: List<Place>, placeId: String, now: Long): Bundle? =
     bundles(places, now).firstOrNull { b -> b.places.any { it.id == placeId } }
 
-private val NUMBERED = Regex("""\d+(·\d+)*가\d*동$|\d+동$""")
+private val NUMBERED = Regex("""\d+(·\d+)*가\d*동$|\d+(·\d+)*동$""")
 
 /** "성수2가1동" → "성수동": administrative dong names as people say them. */
 fun regionDisplayName(raw: String): String {
@@ -57,3 +57,16 @@ fun bundleAlertText(name: String, b: Bundle, enteredId: String): Pair<String, St
     val body = "${entered.name}, ${rest.first().name}" + if (b.places.size > 2) " 외 ${b.places.size - 2}곳" else ""
     return "📍 ${name}에 가 볼 곳 ${b.places.size}곳이 있어요" to body
 }
+
+/**
+ * Bundle ids change when members come and go (the id is the smallest member id). Maps each old id
+ * to the new bundle sharing the most places with it (ties: the smaller id), so UI state such as an
+ * open card follows the neighborhood. Old bundles sharing no place with any new one are left out.
+ */
+fun followBundles(old: Map<String, Set<String>>, now: List<Bundle>): Map<String, String> =
+    old.mapNotNull { (id, members) ->
+        now.map { b -> b to b.places.count { it.id in members } }
+            .filter { it.second > 0 }
+            .sortedWith(compareByDescending<Pair<Bundle, Int>> { it.second }.thenBy { it.first.id })
+            .firstOrNull()?.let { id to it.first.id }
+    }.toMap()

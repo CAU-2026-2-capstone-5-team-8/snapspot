@@ -58,6 +58,8 @@ class BundlesTest {
         assertEquals("역삼동", regionDisplayName("역삼1동"))
         assertEquals("종로동", regionDisplayName("종로1·2·3·4가동"))
         assertEquals("연남동", regionDisplayName("연남동"))
+        assertEquals("상계동", regionDisplayName("상계3·4동"))
+        assertEquals("면목동", regionDisplayName("면목3·8동"))
         assertEquals("동", regionDisplayName("동"))
     }
 

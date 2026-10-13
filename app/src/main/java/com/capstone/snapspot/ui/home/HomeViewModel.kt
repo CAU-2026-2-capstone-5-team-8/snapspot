@@ -10,6 +10,7 @@ import com.capstone.snapspot.SnapSpotApp
 import com.capstone.snapspot.core.Bundle
 import com.capstone.snapspot.core.Coords
 import com.capstone.snapspot.core.REFRESH_ID
+import com.capstone.snapspot.core.RouteMemo
 import com.capstone.snapspot.core.RouteResult
 import com.capstone.snapspot.core.Stop
 import com.capstone.snapspot.core.brandGroups
@@ -18,6 +19,7 @@ import com.capstone.snapspot.core.bundles
 import com.capstone.snapspot.core.cellOf
 import com.capstone.snapspot.core.distanceMeters
 import com.capstone.snapspot.core.fallbackBundleName
+import com.capstone.snapspot.core.followBundles
 import com.capstone.snapspot.core.isActive
 import com.capstone.snapspot.core.isUrgent
 import com.capstone.snapspot.core.model.Branch
@@ -33,6 +35,7 @@ import com.capstone.snapspot.geofence.hasBackgroundLocation
 import com.capstone.snapspot.geofence.hasFineLocation
 import com.capstone.snapspot.notify.notificationsAllowed
 import com.capstone.snapspot.ui.map.MapFocus
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +44,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -90,6 +94,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _openBundle = MutableStateFlow<String?>(null)
     val openBundle: StateFlow<String?> = _openBundle.asStateFlow()
 
+    /** Routes solved recently: position updates away from a bundle do not solve it again. */
+    private val routeMemo = RouteMemo(32)
+
+    /** Members of each bundle at the last update, to carry UI state over when a bundle's id changes. */
+    private var lastMembers: Map<String, Set<String>> = emptyMap()
+
     /** Bundles whose "쿠폰 쓸 곳 포함" switch is on, and the branches found for them (null = the fetch failed). */
     private val _withCoupons = MutableStateFlow<Set<String>>(emptySet())
     val withCoupons: StateFlow<Set<String>> = _withCoupons.asStateFlow()
@@ -102,11 +112,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             val coupons = if (b.id in on) found[b.id].orEmpty() else emptyList()
             val stops: List<Stop> = stopsOf(b.places.map { Coords(it.latitude, it.longitude) }) +
                 coupons.map { cs -> cs.branches.map { Coords(it.latitude, it.longitude) } }
-            val route = shortestRoute(stops, start)
+            val route = routeMemo.route(stops, start, ::shortestRoute)
             val failed = b.id in on && found.containsKey(b.id) && found[b.id] == null
             BundleItem(b, c.regionNames.cached(b.center) ?: fallbackBundleName(b), coupons, route, start, walkMinutes(route.meters), failed)
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /** Cells already looked up this session, so a failing lookup is not retried on every position update. */
     private val namesTried = HashSet<String>()
@@ -128,6 +138,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             combine(c.repo.places, c.repo.coupons, here.map { it != null }, perms.map { it.fg }) { pl, cp, known, fg ->
                 listOf(pl.map { it.id to it.radius }, cp.filter { it.usedAt == null }.map { it.id }, known, fg)
             }.distinctUntilChanged().collect { if (_perms.value.fg) resync() }
+        }
+        // A bundle's id changes when places come and go: keep its card open and its coupon switch on.
+        viewModelScope.launch {
+            bundles.collect { items -> follow(items.map { it.bundle }) }
         }
         // Name bundles the first time they show up (the alert path only reads this cache).
         viewModelScope.launch {
@@ -155,11 +169,30 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (item == null) focusOn(placeId) else if (_openBundle.value != item.bundle.id) toggleBundle(item.bundle.id)
     }
 
+    private fun follow(now: List<Bundle>) {
+        val members = now.associate { b -> b.id to b.places.map { it.id }.toSet() }
+        val moved = followBundles(lastMembers, now)
+        fun next(id: String) = if (members[id] != null && members[id] == lastMembers[id]) id else moved[id]
+        _openBundle.value?.let { id -> if (members[id] != lastMembers[id]) _openBundle.value = next(id) }
+        val on = _withCoupons.value
+        val keep = on.mapNotNull { next(it) }.toSet()
+        if (keep != on || on.any { members[it] != lastMembers[it] }) {
+            // Branches were filtered against the old places: fetch again for bundles whose members changed.
+            couponStops.value = couponStops.value.filterKeys { it in keep && members[it] == lastMembers[it] }
+            _withCoupons.value = keep
+            for (id in keep) if (id !in couponStops.value) fetchCoupons(id)
+        }
+        lastMembers = members
+    }
+
     /** Coupon stops on/off for a bundle; on fetches each brand's branches within 500m of its places (nearest 8 to the center). */
     fun toggleCoupons(bundleId: String) {
         val on = bundleId !in _withCoupons.value
         _withCoupons.value = if (on) _withCoupons.value + bundleId else _withCoupons.value - bundleId
-        if (!on) return
+        if (on) fetchCoupons(bundleId)
+    }
+
+    private fun fetchCoupons(bundleId: String) {
         val b = bundles.value.firstOrNull { it.bundle.id == bundleId }?.bundle ?: return
         viewModelScope.launch {
             val now = System.currentTimeMillis()
