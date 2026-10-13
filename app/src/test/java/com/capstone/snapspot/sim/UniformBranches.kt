@@ -24,7 +24,8 @@ import kotlin.math.sqrt
  * The refresh-radius question under control: one brand, 50 branches spread evenly over a disk (coordinates only,
  * no coupons or Kakao), people walking inside it, and the app's own planRegions choosing what to register.
  *
- * ./gradlew :app:testDebugUnitTest -PuniformSim [-PuniformWrite]  → docs/refresh-radius.md, docs/sim/uniform-*.svg
+ * ./gradlew :app:testDebugUnitTest -Psim [-PsimWrite]  → docs/refresh-radius.md and its charts in docs/sim
+ * (this experiment, then the real-Seoul check from SimulateWindow.kt)
  */
 class UniformBranches {
     private val origin = Coords(37.5447, 127.0560)
@@ -176,7 +177,7 @@ class UniformBranches {
         val dense = s(1000.0, 1000.0); val sparse1000 = s(5000.0, 1000.0); val sparse2000 = s(5000.0, 2000.0); val sparse3000 = s(5000.0, 3000.0)
         val md = """## 갱신 반경: 왜 1km인가
 
-`./gradlew :app:testDebugUnitTest -PuniformSim -PuniformWrite`로 다시 만들 수 있어요 (난수 시드 고정).
+`./gradlew :app:testDebugUnitTest -Psim -PsimWrite`로 다시 만들 수 있어요 (난수 시드 고정). 앞부분은 지점을 고르게 뿌린 통제 실험, 뒷부분은 [실제 서울 데이터로 확인](#실제-서울-데이터로-확인)이에요.
 
 ### 무엇을 정하는 값인가
 
@@ -239,7 +240,7 @@ ${refreshes.joinToString("\n") { r -> val x = s(mid, r); "| ${if (r == 1000.0) "
 
 - **"지나간 지점을 감시 중이던 비율"은 번화가에서 낮게 나와요** (1km에서 ${f1(dense.covered)}%). 지점은 많은데 브랜드당 ${BRANCHES_PER_BRAND}곳만 등록하니까요. 그래도 그중 하나는 거의 늘 지나가서, 사용자가 받는 알림(${f1(dense.first)}%)에는 영향이 없어요. 이 지표만 보면 결론을 잘못 읽어요.
 - **갱신 지연이 결과를 바꿔요.** 2분은 가정값이에요. 실제 기기에서 갱신에 걸리는 시간을 재서 다시 확인해야 해요.
-- **걷기만 봤어요.** 버스로 지나가는 알림은 앱이 일부러 미루기 때문에 여기서는 빼요. 실제 서울 데이터와 버스를 섞은 결과는 [시뮬레이션 보고서](simulation.md)에 있어요.
+- **걷기만 봤어요.** 버스로 지나가는 알림은 앱이 일부러 미루기 때문에 여기서는 빼요. 실제 서울 데이터와 버스를 섞은 결과는 아래 [실제 서울 데이터로 확인](#실제-서울-데이터로-확인)에 있어요.
 - **브랜드 하나만 넣었어요.** 브랜드가 여러 개여도 칸(${MAX_REGIONS}칸)이 넉넉하면 브랜드마다 같은 규칙이 따로 적용돼서 결과는 같아요.
 
 ### 전체 표
@@ -258,11 +259,14 @@ ${table(5000.0)}"""
 
     @Test
     fun report_() {
-        assumeTrue(System.getProperty("uniform.run") == "true", "run with ./gradlew :app:testDebugUnitTest -PuniformSim")
-        val (md, charts) = report()
+        assumeTrue(System.getProperty("sim.run") == "true", "run with ./gradlew :app:testDebugUnitTest -Psim")
+        val (uniformMd, uniformCharts) = report()
+        val seoul = simulationReport()
+        val md = uniformMd + "\n\n" + seoul.markdown
+        val charts = uniformCharts + seoul.charts
         println(md)
-        if (System.getProperty("uniform.write") == "true") {
-            val out = File(requireNotNull(System.getProperty("uniform.out")))
+        if (System.getProperty("sim.write") == "true") {
+            val out = File(requireNotNull(System.getProperty("sim.out")))
             out.writeText(md)
             val dir = File(out.parentFile, "sim").apply { mkdirs() }
             charts.forEach { (name, svg) -> File(dir, name).writeText(svg) }

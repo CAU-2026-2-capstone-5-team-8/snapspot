@@ -44,12 +44,12 @@ android {
         unitTests.isReturnDefaultValues = true
         unitTests.all {
             it.useJUnitPlatform()
-            // ./gradlew :app:testDebugUnitTest -Psim [-PsimWrite]: geofence strategy simulation (docs/simulation.md).
+            // ./gradlew :app:testDebugUnitTest -Psim [-PsimWrite]: refresh radius experiment + real-Seoul check (docs/refresh-radius.md).
             if (project.hasProperty("sim")) {
-                it.filter.includeTestsMatching("*SimulateWindow*")
+                it.filter.includeTestsMatching("*UniformBranches*")
                 it.systemProperty("sim.run", "true")
                 it.systemProperty("sim.write", project.hasProperty("simWrite").toString())
-                it.systemProperty("sim.out", rootProject.file("docs/simulation.md").absolutePath)
+                it.systemProperty("sim.out", rootProject.file("docs/refresh-radius.md").absolutePath)
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }
@@ -59,15 +59,6 @@ android {
                 it.systemProperty("sim.fetch", "true")
                 it.systemProperty("sim.kakaoKey", localProps.getProperty("KAKAO_REST_KEY") ?: System.getenv("KAKAO_REST_KEY") ?: "")
                 it.systemProperty("sim.dataOut", project.file("src/test/resources/sim/seoul.json").absolutePath)
-                it.testLogging.showStandardStreams = true
-                it.outputs.upToDateWhen { false }
-            }
-            // ./gradlew :app:testDebugUnitTest -PuniformSim [-PuniformWrite]: refresh radius over evenly spread branches (docs/refresh-radius.md).
-            if (project.hasProperty("uniformSim")) {
-                it.filter.includeTestsMatching("*UniformBranches*")
-                it.systemProperty("uniform.run", "true")
-                it.systemProperty("uniform.write", project.hasProperty("uniformWrite").toString())
-                it.systemProperty("uniform.out", rootProject.file("docs/refresh-radius.md").absolutePath)
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }

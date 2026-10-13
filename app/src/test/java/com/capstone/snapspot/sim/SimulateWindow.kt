@@ -1,8 +1,8 @@
 /**
  * How many visits does each geofence strategy catch, and at what cost?
  *
- *   ./gradlew :app:testDebugUnitTest -Psim            # prints the report
- *   ./gradlew :app:testDebugUnitTest -Psim -PsimWrite # also writes docs/simulation.md and the SVG charts in docs/sim
+ * The "실제 서울 데이터로 확인" part of docs/refresh-radius.md; UniformBranches runs it and writes the file:
+ *   ./gradlew :app:testDebugUnitTest -Psim -PsimWrite
  *
  * Drives the real planner (core/Window.kt) over simulated days in Seoul, built on real data
  * (sim/seoul.json, see FetchSimData): 160 cafés, restaurants and venues in 8 neighborhoods people
@@ -27,9 +27,6 @@ import com.capstone.snapspot.core.cellOf
 import com.capstone.snapspot.core.distanceMeters
 import com.capstone.snapspot.core.planRegions
 import kotlinx.serialization.json.Json
-import org.junit.jupiter.api.Assumptions.assumeTrue
-import org.junit.jupiter.api.Test
-import java.io.File
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.cos
@@ -77,7 +74,7 @@ private fun coords(p: Xy) = Coords(CENTER.latitude + p.y / M_PER_DEG_LAT, CENTER
 private val simJson = Json { ignoreUnknownKeys = true }
 
 private val data: SimData by lazy {
-    val text = SimulateWindow::class.java.classLoader!!.getResource("sim/seoul.json")!!.readText()
+    val text = SimData::class.java.classLoader!!.getResource("sim/seoul.json")!!.readText()
     simJson.decodeFromString(SimData.serializer(), text)
 }
 
@@ -364,17 +361,6 @@ fun simulationReport(): SimReport {
     val trips = USERS * TRIPS_PER_USER
 
     val charts = mapOf(
-        "refresh.svg" to lineChart(
-            title = "지점 200m 안을 지날 때 그 지점을 감시 중이던 비율",
-            xLabel = "갱신 반경", xs = refreshes.map { "${it.toInt()}m" }, yLabel = "%",
-            // 20 slots register no branches at all with 30 saved places (see saved.svg), so that line would sit at 0.
-            series = listOf(50, 90).mapIndexed { i, s -> Series("${s}칸", i + 1, refreshes.map { r -> gridRow(s, r).stat { it.branch }.first }) },
-        ),
-        "wakeups.svg" to lineChart(
-            title = "갱신 반경별 km당 갱신 횟수",
-            xLabel = "갱신 반경", xs = refreshes.map { "${it.toInt()}m" }, yLabel = "회/km", percent = false,
-            series = listOf(Series("갱신 횟수", 2, refreshes.map { r -> gridRow(90, r).stat { it.replansPerKm }.first })),
-        ),
         "saved.svg" to lineChart(
             title = "저장한 장소 수별 쿠폰 알림을 받은 비율 (갱신 1000m)",
             xLabel = "저장한 장소 수", xs = savedCounts.map { "${it}곳" }, yLabel = "%",
@@ -382,9 +368,9 @@ fun simulationReport(): SimReport {
         ),
     )
 
-    val md = """## 지오펜스 전략 시뮬레이션
+    val md = """## 실제 서울 데이터로 확인
 
-`./gradlew :app:testDebugUnitTest -Psim -PsimWrite`로 다시 만들 수 있어요 (난수 시드 고정).
+위 통제 실험은 지점을 고르게 뿌리고 걷기만 봤어요. 여기서는 같은 계획 코드(`planRegions`)를 실제 서울 장소·지점과 버스 이동으로 돌려서, 1km 설정이 실제 환경에서도 알림을 잃지 않는지 확인해요.
 
 ### 가정
 
@@ -394,33 +380,23 @@ fun simulationReport(): SimReport {
 - **사용자 ${USERS}명 × 하루 ${TRIPS_PER_USER}번 외출**, 시드 ${SEEDS.size}개로 반복 (총 ${trips * SEEDS.size}번 외출, 시드당 약 ${first.km.roundToInt()}km)
   - 집은 동네들을 둘러싼 지역의 아무 곳. 외출은 한 동네에 가서 네 곳을 걸어 다니고, 40%는 다른 동네에 한 번 더 들렀다가 집으로
   - ${WALK_MAX_M.toInt() / 1000.0}km보다 먼 구간은 버스(${BUS_MPS}m/s), 나머지는 걷기(${WALK_MPS}m/s)
-  - 저장한 장소는 사람마다 ${data.places.size}곳 중 무작위. 기본 30곳이고, 10곳은 30곳에, 30곳은 60곳에 포함돼요
+  - 사용자는 세 브랜드 쿠폰을 모두 가지고 있다고 봐요. 저장한 장소는 사람마다 ${data.places.size}곳 중 무작위로, 기본 30곳이고 10곳은 30곳에, 30곳은 60곳에 포함돼요
 - **방문**: 장소·지점 반경(200m) 안에 들어갔다 나온 한 번. 그 사이 한 순간이라도 그곳이 OS 감시 목록에 들어 있으면 "잡은 방문"이에요
-- **쿠폰 알림** (사용자가 받는 것): 어떤 브랜드 지점을 하나라도 지나간 외출에서, 그 브랜드 알림이 한 번이라도 울린 비율이에요. 쿠폰은 브랜드마다 한 번 울리면 돼요
-- **지나간 지점을 감시 중이던 비율** (더 엄격한 지표): 지점 200m 안을 지나간 모든 경우 중, 그 순간 바로 그 지점이 감시 목록에 있던 비율이에요. 갱신 전에 보였던 지점을 갱신 뒤에 다시 잡았는지를 보는 게 아니에요
+- **쿠폰 알림** (사용자가 받는 것): 어떤 브랜드 지점을 하나라도 지나간 외출에서, 그 브랜드 알림이 한 번이라도 울린 비율이에요
+- **지나간 지점을 감시 중이던 비율** (더 엄격한 지표): 지점 200m 안을 지나간 모든 경우 중, 그 순간 바로 그 지점이 감시 목록에 있던 비율이에요
 - **버스로 지나가며 울린 알림**: 지금 앱은 이 알림을 미뤘다가, 근처에서 내려 걸을 때만 울려요
-- 카카오 검색은 실제처럼 격자 칸 중심에서 반경 ${SEARCH_RADIUS_M / 1000.0}km, 최대 ${KAKAO_CAP}곳만 돌려준다고 가정. 갱신 구역을 벗어난 뒤 갱신이 끝나기까지 별도 표시가 없으면 2분
-- 수치는 시드 3개의 평균이고, 괄호는 최솟값–최댓값이에요 (차이가 거의 없으면 생략)
+- 카카오 검색은 실제처럼 격자 칸 중심에서 반경 ${SEARCH_RADIUS_M / 1000.0}km, 최대 ${KAKAO_CAP}곳만 돌려준다고 가정. 갱신 지연은 따로 적지 않으면 2분
+- 수치는 시드 3개의 평균이고, 괄호는 (최솟값–최댓값)과 (해당 수/전체 수)예요
 
-### 갱신 반경: 왜 1000m인가
-
-> **1km를 고른 근거는 [갱신 반경 보고서](refresh-radius.md)에 따로 정리했어요.** 지점을 고르게 뿌린 통제 실험에서, 처음 지나간 지점에서 바로 울리는 비율이 1km까지는 99% 이상으로 유지되고 1km를 넘으면 떨어져요 (서울 평균 밀도 기준 1.5km 94%, 2km 90%). 아래는 실제 서울 데이터로 같은 질문을 확인한 결과예요.
-
-앱은 OS에 한 번에 ${MAX_REGIONS}곳까지만 감시를 맡길 수 있어서, 갱신할 때마다 **그 자리에서 가까운** 지점을 브랜드마다 7곳씩 골라 등록해요. 그 자리에서 멀어질수록 등록된 7곳은 "아까 있던 곳 근처"가 되고, 지금 지나가는 지점은 목록에 없을 가능성이 커져요. 갱신 반경은 "얼마나 멀어지면 다시 고르나"예요. 작을수록 목록이 지금 위치에 맞지만, 그만큼 자주 위치를 다시 받고 카카오를 다시 검색해요.
-
-![지점 200m 안을 지날 때 그 지점을 감시 중이던 비율](sim/refresh.svg)
-![갱신 반경별 km당 갱신 횟수](sim/wakeups.svg)
-
-첫 그래프는 사용자가 쿠폰 지점 200m 안을 지나갈 때마다 한 번씩 세서, 그 순간 그 지점이 감시 목록에 있었는지를 봐요. 두 번째 그래프는 그 대가로 1km 이동마다 몇 번 갱신하는지예요.
+### 갱신 반경
 
 $why
-- **사용자가 받는 쿠폰 알림은 500m와 1000m가 같아요** (${pctOf(at(1000.0)) { it.brand }}). 쿠폰은 브랜드마다 한 번 울리면 되니, 지점 몇 곳을 놓쳐도 그 외출에서 다른 지점에서 울려요. 500m는 감시 비율이 더 높지만 갱신을 ${moreWakeups}배 더 하고, 사용자에게 달라지는 건 거의 없어요.
-- **2000m는 갱신이 가장 적지만, 지나간 지점의 절반 넘게(${f1(100 - at(2000.0).stat { it.branch }.first)}%) 감시하지 못해요.** 쿠폰 알림 자체는 ${pctOf(at(2000.0)) { it.brand }}로 거의 그대로지만, 처음 지나간 지점을 놓치면 다음 지점에 갈 때까지 알림이 늦어져요.
-- 그래서 **사용자가 받는 알림을 잃지 않으면서, 처음 만나는 지점을 놓칠 확률도 크게 늘리지 않는 값**으로 1000m를 골랐어요. 1000m와 2000m 사이는 "첫 지점에서 바로 울리는 것"을 얼마나 중시하느냐의 판단이에요.
-- **칸 수는 큰 원인이 아니에요.** 50칸과 90칸의 차이는 2%p 안팎이에요. 놓치는 원인은 칸 부족보다 목록이 오래된 데 있어요.
-- **1000m에서 놓치는 것의 대부분은 갱신이 늦게 끝나서예요.** 같은 1000m라도 갱신 지연이 0초면 ${pctOf(delayed(0)) { it.branch }}(500m 수준)이고, 2분이면 ${pctOf(delayed(120)) { it.branch }}, 5분이면 ${pctOf(delayed(300)) { it.branch }}예요. 2분은 가정값이라, 실제 기기에서 갱신에 걸리는 시간을 재는 게 다음 확인 거리예요.
+- **사용자가 받는 쿠폰 알림은 500m와 1km가 같아요** (${pctOf(at(1000.0)) { it.brand }}). 500m는 갱신을 ${moreWakeups}배 더 하지만 사용자에게 달라지는 건 거의 없어요. 통제 실험과 같은 결론이에요.
+- **"지나간 지점을 감시 중이던 비율"은 반경이 커질수록 떨어져요** (500m ${pctOf(at(500.0)) { it.branch }}, 1km ${pctOf(at(1000.0)) { it.branch }}, 2km ${pctOf(at(2000.0)) { it.branch }}). 서울 데이터는 번화가에 지점이 몰려 있어서, 브랜드당 7곳만 등록하면 지나가는 지점 중 상당수는 목록 밖이에요. 그래도 그중 하나는 거의 늘 지나가서 알림은 울려요.
+- **칸 수는 큰 원인이 아니에요.** 50칸과 90칸의 차이는 2%p 안팎이에요.
+- **갱신 지연이 크게 작용해요.** 같은 1km라도 지연 0초면 ${pctOf(delayed(0)) { it.branch }}, 2분이면 ${pctOf(delayed(120)) { it.branch }}, 5분이면 ${pctOf(delayed(300)) { it.branch }}예요. 2분은 가정값이라 실제 기기에서 재야 해요.
 
-#### 전체 표
+#### 전략별 전체 표
 
 ${table(mainRows)}
 저장한 장소는 모든 설정에서 놓친 방문이 없어요. 장소가 우선순위 1순위라 가까운 순으로 먼저 칸을 차지해서, 근처에 가면 늘 등록돼 있어요. 설정에 따라 달라지는 건 쿠폰 쪽이에요.
@@ -438,21 +414,4 @@ ${table(savedRows)}
 
 ${table(capRows)}"""
     return SimReport(md, charts)
-}
-
-/** Runs only with -Psim (it takes a while). */
-class SimulateWindow {
-    @Test
-    fun report() {
-        assumeTrue(System.getProperty("sim.run") == "true", "run with ./gradlew :app:testDebugUnitTest -Psim")
-        val report = simulationReport()
-        println(report.markdown)
-        if (System.getProperty("sim.write") == "true") {
-            val out = File(requireNotNull(System.getProperty("sim.out")))
-            out.writeText(report.markdown)
-            val dir = File(out.parentFile, "sim").apply { mkdirs() }
-            report.charts.forEach { (name, svg) -> File(dir, name).writeText(svg) }
-            println("wrote $out and ${report.charts.size} charts in $dir")
-        }
-    }
 }

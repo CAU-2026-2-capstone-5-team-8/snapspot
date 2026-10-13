@@ -6,7 +6,7 @@ This is a native Android app in Kotlin: Jetpack Compose UI, Google Play Services
 ./gradlew testDebugUnitTest                         # unit tests (JUnit 5)
 ./gradlew assembleDebug                             # debug APK
 ./gradlew installDebug                              # install on the connected device/emulator
-./gradlew :app:testDebugUnitTest -Psim -PsimWrite   # geofence simulation → docs/simulation.md
+./gradlew :app:testDebugUnitTest -Psim -PsimWrite   # refresh radius experiment + real-Seoul check → docs/refresh-radius.md
 ```
 
 Run the unit tests and `assembleDebug` before declaring any task done. CI (`.github/workflows/android.yml`) runs both on every push and PR.
