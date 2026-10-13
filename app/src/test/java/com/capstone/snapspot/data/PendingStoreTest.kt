@@ -1,6 +1,7 @@
 package com.capstone.snapspot.data
 
 import com.capstone.snapspot.core.NOW
+import com.capstone.snapspot.core.PENDING_MAX_MS
 import com.capstone.snapspot.core.PendingAlert
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -23,7 +24,18 @@ class PendingStoreTest {
         assertEquals(listOf("b|sb|2", "p1"), reopened.all().map { it.regionId })
         assertEquals(NOW, reopened.all().first().since)
 
-        reopened.remove(setOf("sb"))
+        reopened.remove(reopened.all().filter { it.group == "sb" })
         assertEquals(listOf("p1"), PendingStore(dir).all().map { it.regionId })
+    }
+
+    @Test
+    fun `removing settled holds keeps one that arrived since`() = runTest {
+        val store = PendingStore(dir)
+        val old = PendingAlert("b|sb|1", "sb", 37.0, 127.0, NOW)
+        store.add(old)
+        val snapshot = store.all()
+        store.add(PendingAlert("b|sb|2", "sb", 37.1, 127.1, NOW + PENDING_MAX_MS + 1))
+        store.remove(snapshot)
+        assertEquals(listOf("b|sb|2"), store.all().map { it.regionId })
     }
 }

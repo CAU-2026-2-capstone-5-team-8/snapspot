@@ -66,16 +66,17 @@ class LocationTracker(private val ctx: Context) {
 /**
  * One position with its speed, for background work. A fix from the last minute is reused;
  * otherwise Wi-Fi/cell first, then GPS once (emulators and places without Wi-Fi have no network fix).
+ * `needSpeed`: GPS first, since Wi-Fi/cell fixes carry no speed and "still on the bus" would read as walking.
  */
 @SuppressLint("MissingPermission")
-suspend fun currentFix(ctx: Context): Fix? {
+suspend fun currentFix(ctx: Context, needSpeed: Boolean = false): Fix? {
     if (!hasFineLocation(ctx)) return null
     val fused = LocationServices.getFusedLocationProviderClient(ctx)
+    suspend fun at(priority: Int) = runCatching { fused.getCurrentLocation(priority, null).await() }.getOrNull()
     val last = runCatching { fused.lastLocation.await() }.getOrNull()
         ?.takeIf { SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos < 60_000_000_000L }
-    val loc = last
-        ?: runCatching { fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await() }.getOrNull()
-        ?: runCatching { fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await() }.getOrNull()
+    val loc = (if (needSpeed) at(Priority.PRIORITY_HIGH_ACCURACY) ?: last ?: at(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
+    else last ?: at(Priority.PRIORITY_BALANCED_POWER_ACCURACY) ?: at(Priority.PRIORITY_HIGH_ACCURACY))
         ?: return null
     return Fix(Coords(loc.latitude, loc.longitude), loc.takeIf { it.hasSpeed() }?.speed)
 }

@@ -19,7 +19,11 @@ class PendingStore(dir: File) {
 
     suspend fun add(p: PendingAlert) = lock.withLock { file.write(mergePending(file.read().orEmpty(), p)) }
 
-    suspend fun remove(groups: Set<String>) = lock.withLock {
-        file.write(file.read().orEmpty().filterNot { it.group in groups })
+    /**
+     * Removes exactly these settled entries. A hold merged in after they were read has a different
+     * target or start, so it stays.
+     */
+    suspend fun remove(settled: List<PendingAlert>) = lock.withLock {
+        file.write(file.read().orEmpty().filterNot { it in settled })
     }
 }

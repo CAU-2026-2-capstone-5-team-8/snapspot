@@ -44,8 +44,13 @@ fun decidePending(p: PendingAlert, fix: Fix?, now: Long): PendingDecision {
     return if (near) PendingDecision.ALERT else PendingDecision.DROP
 }
 
-/** Adds `p`, folding it into a held alert of the same group: the latest target, the first `since`. */
+/**
+ * Adds `p`, folding it into a held alert of the same group: the latest target, the first `since`.
+ * A held alert already past [PENDING_MAX_MS] (left behind if a recheck never ran) is replaced, so it
+ * cannot hand its old start to a new pass.
+ */
 fun mergePending(list: List<PendingAlert>, p: PendingAlert): List<PendingAlert> {
     val old = list.firstOrNull { it.group == p.group } ?: return list + p
-    return list.map { if (it.group == p.group) p.copy(since = minOf(old.since, p.since)) else it }
+    val since = if (p.since - old.since > PENDING_MAX_MS) p.since else minOf(old.since, p.since)
+    return list.map { if (it.group == p.group) p.copy(since = since) else it }
 }

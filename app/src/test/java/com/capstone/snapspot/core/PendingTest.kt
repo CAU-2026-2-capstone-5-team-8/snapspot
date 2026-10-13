@@ -64,4 +64,11 @@ class PendingTest {
         assertEquals(37.1, sb.latitude)
         assertEquals(NOW, sb.since)
     }
+
+    @Test
+    fun `a hold past its 30 minutes starts over instead of passing on its old start`() {
+        val stale = PendingAlert("b|starbucks|1", "starbucks", 37.0, 127.0, since = NOW)
+        val fresh = PendingAlert("b|starbucks|2", "starbucks", 37.1, 127.1, since = NOW + PENDING_MAX_MS + 1)
+        assertEquals(NOW + PENDING_MAX_MS + 1, mergePending(listOf(stale), fresh).single().since)
+    }
 }

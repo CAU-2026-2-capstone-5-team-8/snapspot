@@ -5,6 +5,7 @@ import android.content.Context
 import android.location.LocationManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.ExistingWorkPolicy
 import com.capstone.snapspot.SnapSpotApp
 import com.capstone.snapspot.core.Coords
 import com.capstone.snapspot.core.REFRESH_ID
@@ -14,6 +15,7 @@ import com.capstone.snapspot.core.isActive
 import com.capstone.snapspot.core.isUrgent
 import com.capstone.snapspot.core.model.Coupon
 import com.capstone.snapspot.core.model.Place
+import com.capstone.snapspot.geofence.RecheckWorker
 import com.capstone.snapspot.geofence.SyncResult
 import com.capstone.snapspot.geofence.hasBackgroundLocation
 import com.capstone.snapspot.geofence.hasFineLocation
@@ -99,7 +101,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun onResume() {
         c.onScreen = true
         refreshPerms()
-        viewModelScope.launch { c.repo.reload() }
+        viewModelScope.launch {
+            c.repo.reload()
+            // Held alerts whose recheck chain broke (failure, process death) get picked up again.
+            if (c.pending.all().isNotEmpty()) RecheckWorker.schedule(getApplication(), ExistingWorkPolicy.KEEP)
+        }
     }
 
     /** Out of sight, geofences take over; continuous updates would only drain the battery. */
