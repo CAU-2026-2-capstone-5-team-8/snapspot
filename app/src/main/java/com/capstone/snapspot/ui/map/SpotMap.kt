@@ -219,7 +219,8 @@ private fun draw(m: KakaoMap, places: List<MapPlace>, branches: List<MapBranch>,
         val bmp = badge(p.number?.toString() ?: p.initial, fill.toArgb(), SnapColors.surface.toArgb(), SnapColors.surface.toArgb(), if (p.selected) 34 else 28, 3f, density)
         labels.addLabel(
             LabelOptions.from(p.id, latLng(p.at)).setStyles(LabelStyles.from(LabelStyle.from(bmp).setAnchorPoint(0.5f, 0.5f)))
-                .setTag(p.id).setClickable(true).setRank(if (p.selected) 10 else 5),
+                // Numbered route pins sit above the user's dot (rank 20), so standing on stop 1 does not hide its number.
+                .setTag(p.id).setClickable(true).setRank(if (p.number != null) 30 else if (p.selected) 10 else 5),
         )
     }
     here?.let {

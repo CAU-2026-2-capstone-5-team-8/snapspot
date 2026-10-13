@@ -43,12 +43,13 @@ class AlertService(
         val place = places.firstOrNull { it.id == placeId } ?: return@withLock false
         val now = clock()
         val bundle = bundleOf(places, placeId, now)
-        if (bundle != null && !force) {
+        if (bundle != null) {
             // One alert per neighborhood walk: any member alerted recently holds it back.
-            if (bundle.places.any { p -> p.lastNotifiedAt?.let { now - it < PLACE_COOLDOWN_MS } == true }) return@withLock false
+            if (!force && bundle.places.any { p -> p.lastNotifiedAt?.let { now - it < PLACE_COOLDOWN_MS } == true }) return@withLock false
             val (title, body) = bundleAlertText(bundleName(bundle), bundle, placeId)
             notifier.show(bundle.id.hashCode(), title, body, "snapspot://bundle/$placeId")
-            for (p in bundle.places) repo.markPlaceNotified(p.id, now)
+            // A forced preview (the bundle card's button) leaves the cooldown alone so the real alert still comes.
+            if (!force) repo.markPlacesNotified(bundle.places.map { it.id }.toSet(), now)
             return@withLock true
         }
         if (!force && suppressReason(place, now) != null) return@withLock false

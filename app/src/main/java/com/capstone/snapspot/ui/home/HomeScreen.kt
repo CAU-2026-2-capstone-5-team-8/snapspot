@@ -184,7 +184,7 @@ fun HomeScreen(
                                 items(bundleItems, key = { it.bundle.id }) { b ->
                                     BundleCard(
                                         b, open = b.bundle.id == openBundle, withCoupons = b.bundle.id in couponsOn,
-                                        onClick = { vm.toggleBundle(b.bundle.id) }, onCoupons = { vm.toggleCoupons(b.bundle.id) },
+                                        onClick = { vm.toggleBundle(b.bundle.id) }, onCoupons = { vm.toggleCoupons(b.bundle.id) }, onPreview = { vm.previewBundle(b.bundle.id) },
                                     )
                                 }
                             }
@@ -346,7 +346,7 @@ private fun routeStops(b: BundleItem): List<RouteStop> = b.route.order.indices.m
 }
 
 @Composable
-private fun BundleCard(b: BundleItem, open: Boolean, withCoupons: Boolean, onClick: () -> Unit, onCoupons: () -> Unit) {
+private fun BundleCard(b: BundleItem, open: Boolean, withCoupons: Boolean, onClick: () -> Unit, onCoupons: () -> Unit, onPreview: () -> Unit) {
     val fg = if (open) SnapColors.surface else SnapColors.ink
     Column(
         Modifier.width(220.dp).clip(RoundedCornerShape(16.dp))
@@ -362,7 +362,10 @@ private fun BundleCard(b: BundleItem, open: Boolean, withCoupons: Boolean, onCli
                 Text("쿠폰 쓸 곳 포함", style = SnapType.meta.copy(color = fg), modifier = Modifier.weight(1f))
                 Switch(checked = withCoupons, onCheckedChange = { onCoupons() })
             }
-            if (b.couponsFailed) Text("쿠폰 지점을 불러오지 못했어요", style = SnapType.meta.copy(color = SnapColors.surface))
+            if (b.couponsFailed) Text(if (b.coupons.isEmpty()) "쿠폰 지점을 불러오지 못했어요" else "일부 쿠폰 지점을 불러오지 못했어요", style = SnapType.meta.copy(color = SnapColors.surface))
+            TextButton(onClick = onPreview, contentPadding = PaddingValues(0.dp)) {
+                Text("알림 미리보기", style = SnapType.meta.copy(color = SnapColors.highlight))
+            }
         }
     }
 }

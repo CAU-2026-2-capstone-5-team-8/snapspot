@@ -4,7 +4,9 @@
  */
 package com.capstone.snapspot.core
 
+import com.capstone.snapspot.core.model.Branch
 import com.capstone.snapspot.core.model.Place
+import kotlin.coroutines.cancellation.CancellationException
 
 const val BUNDLE_LINK_M = 700.0
 const val BUNDLE_MIN = 3
@@ -70,3 +72,32 @@ fun followBundles(old: Map<String, Set<String>>, now: List<Bundle>): Map<String,
             .sortedWith(compareByDescending<Pair<Bundle, Int>> { it.second }.thenBy { it.first.id })
             .firstOrNull()?.let { id to it.first.id }
     }.toMap()
+
+/** A coupon brand as a route stop: any one of these branches will do. */
+data class CouponStop(val brand: String, val branches: List<Branch>)
+
+/** Coupon stops found for a bundle, and how many brands could not be searched. */
+data class CouponFetch(val stops: List<CouponStop>, val failed: Int)
+
+/**
+ * Each brand's branches within 500m of a bundle place, nearest 8 to the center. Brands are searched
+ * one by one, so one failing search drops only that brand.
+ */
+suspend fun nearbyCouponStops(places: List<Place>, center: Coords, brands: List<String>, search: suspend (String) -> List<Branch>): CouponFetch {
+    var failed = 0
+    val stops = brands.mapNotNull { brand ->
+        val found = try {
+            search(brand)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            failed++
+            return@mapNotNull null
+        }
+        val near = found.filter { br -> places.any { distanceMeters(it.at(), Coords(br.latitude, br.longitude)) <= 500 } }
+            .sortedBy { distanceMeters(center, Coords(it.latitude, it.longitude)) }
+            .take(8)
+        if (near.isEmpty()) null else CouponStop(brand, near)
+    }
+    return CouponFetch(stops, failed)
+}
