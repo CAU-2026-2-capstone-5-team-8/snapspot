@@ -71,4 +71,12 @@ class PendingTest {
         val fresh = PendingAlert("b|starbucks|2", "starbucks", 37.1, 127.1, since = NOW + PENDING_MAX_MS + 1)
         assertEquals(NOW + PENDING_MAX_MS + 1, mergePending(listOf(stale), fresh).single().since)
     }
+
+    @Test
+    fun `while the app is on screen a due alert stays held for after it closes`() {
+        val walking = Fix(north(600.0), 1.2f)
+        assertEquals(PendingDecision.RECHECK, decidePending(held, walking, NOW + 3 * 60_000, onScreen = true))
+        assertEquals(PendingDecision.ALERT, decidePending(held, walking, NOW + 6 * 60_000, onScreen = false))
+        assertEquals(PendingDecision.DROP, decidePending(held, walking, NOW + PENDING_MAX_MS + 1, onScreen = true))
+    }
 }

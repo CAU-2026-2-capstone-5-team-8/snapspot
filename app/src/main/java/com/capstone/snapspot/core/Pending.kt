@@ -37,11 +37,19 @@ data class PendingAlert(
 
 enum class PendingDecision { ALERT, RECHECK, DROP }
 
-fun decidePending(p: PendingAlert, fix: Fix?, now: Long): PendingDecision {
+/**
+ * `onScreen`: the app shows no notifications while open, and a held place up to 1km away is outside
+ * its "지금 근처예요" radius, so an alert due now waits for the app to close instead of vanishing.
+ */
+fun decidePending(p: PendingAlert, fix: Fix?, now: Long, onScreen: Boolean = false): PendingDecision {
     if (now - p.since > PENDING_MAX_MS) return PendingDecision.DROP
     if (fix == null || isVehicleSpeed(fix.speed)) return PendingDecision.RECHECK
     val near = distanceMeters(fix.at, Coords(p.latitude, p.longitude)) <= PENDING_NEAR_M
-    return if (near) PendingDecision.ALERT else PendingDecision.DROP
+    return when {
+        !near -> PendingDecision.DROP
+        onScreen -> PendingDecision.RECHECK
+        else -> PendingDecision.ALERT
+    }
 }
 
 /**
