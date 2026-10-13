@@ -53,6 +53,15 @@ android {
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }
+            // ./gradlew :app:testDebugUnitTest -PsimFetch: refresh the simulation's real Seoul data from Kakao.
+            if (project.hasProperty("simFetch")) {
+                it.filter.includeTestsMatching("*FetchSimData*")
+                it.systemProperty("sim.fetch", "true")
+                it.systemProperty("sim.kakaoKey", localProps.getProperty("KAKAO_REST_KEY") ?: System.getenv("KAKAO_REST_KEY") ?: "")
+                it.systemProperty("sim.dataOut", project.file("src/test/resources/sim/seoul.json").absolutePath)
+                it.testLogging.showStandardStreams = true
+                it.outputs.upToDateWhen { false }
+            }
         }
     }
 }
