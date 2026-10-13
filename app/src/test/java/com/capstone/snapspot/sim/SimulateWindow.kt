@@ -316,8 +316,8 @@ private fun table(rows: List<Row>) = buildString {
     for (r in rows) {
         val sum = { f: (Result) -> Int -> r.results.sumOf(f) }
         appendLine(
-            "| ${r.st.name} | ${r.pct { it.place }} (${sum { it.placeCaught }}/${sum { it.placeTotal }}) | ${r.pct { it.brand }} | " +
-                "${r.pct { it.branch }} | ${f2(r.stat { it.replansPerKm }.first)} | ${f1(r.stat { it.bus }.first)}% |",
+            "| ${r.st.name} | ${r.pct { it.place }} (${sum { it.placeCaught }}/${sum { it.placeTotal }}) | ${r.pct { it.brand }} (${sum { it.brandCaught }}/${sum { it.brandTotal }}) | " +
+                "${r.pct { it.branch }} (${sum { it.branchCaught }}/${sum { it.branchTotal }}) | ${f2(r.stat { it.replansPerKm }.first)} | ${f1(r.stat { it.bus }.first)}% |",
         )
     }
 }
