@@ -74,4 +74,28 @@ class AlertServiceTest {
         repo.upsertCoupon(coupon(id = "c", usedAt = 1))
         assertFalse(svc.onBranchEnter("b|${brandKey("스타벅스")}|42"))
     }
+
+    @Test
+    fun `on screen, nothing is shown or recorded`() = runTest {
+        val repo = Repository(dir)
+        val notifier = FakeNotifier()
+        var onScreen = true
+        val svc = AlertService(repo, notifier, onScreen = { onScreen }) { NOW }
+        repo.upsertPlace(place(id = "p"))
+        repo.upsertCoupon(coupon(id = "c", brand = "스타벅스"))
+        repo.saveWindow(
+            WindowState(NOW, null, 90, emptyMap(), mapOf("b|${brandKey("스타벅스")}|1" to WindowBranch("스타벅스 성수점", brandKey("스타벅스"), 37.0, 127.0, false)), 0),
+        )
+
+        assertFalse(svc.onPlaceEnter("p"))
+        assertFalse(svc.onBranchEnter("b|${brandKey("스타벅스")}|1"))
+        assertEquals(0, notifier.shown.size)
+        assertEquals(null, repo.places.value.single().lastNotifiedAt)
+
+        assertTrue(svc.onPlaceEnter("p", force = true))
+
+        onScreen = false
+        assertTrue(svc.onBranchEnter("b|${brandKey("스타벅스")}|1"))
+        assertEquals(2, notifier.shown.size)
+    }
 }

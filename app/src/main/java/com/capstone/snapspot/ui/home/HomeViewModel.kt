@@ -80,14 +80,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             val at = here.filterNotNull().first()
             if (_focus.value == null) _focus.value = MapFocus(at, System.nanoTime(), 15)
         }
-        // In-app watcher: alerts while the app is open, even before background permission.
-        viewModelScope.launch {
-            here.filterNotNull().collect { at ->
-                for (p in c.repo.places.value) {
-                    if (distanceMeters(at, Coords(p.latitude, p.longitude)) <= p.radius) c.alerts.onPlaceEnter(p.id)
-                }
-            }
-        }
         // Saved data or the first position changes what the window registers.
         viewModelScope.launch {
             combine(c.repo.places, c.repo.coupons, here.map { it != null }, perms.map { it.fg }) { pl, cp, known, fg ->
@@ -105,12 +97,16 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun onResume() {
+        c.onScreen = true
         refreshPerms()
         viewModelScope.launch { c.repo.reload() }
     }
 
     /** Out of sight, geofences take over; continuous updates would only drain the battery. */
-    fun onStop() = c.location.stop()
+    fun onStop() {
+        c.onScreen = false
+        c.location.stop()
+    }
 
     fun resync() {
         viewModelScope.launch { _sync.value = c.geofenceSync.sync(here.value) }
