@@ -123,16 +123,16 @@ class RouteBench {
         val bruteRows = rows.filter { it.brute != null }
         val bruteLast = bruteRows.last()
         fun work(n: Int) = (1..n).fold(1.0) { a, k -> a * k } * n
-        val bruteAll = NS.filter { it > bruteLast.n }.map { n -> bruteLast.brute!! * work(n) / work(bruteLast.n) }
-        // Drawn only up to a few hours so the measured lines keep their room; the label carries the n = 20 figure.
-        val bruteEstimate = bruteAll.filter { it <= BRUTE_DRAW_MAX_MS }
+        // Drawn only up to a few hours so the measured lines keep their room.
+        val bruteEstimate = NS.filter { it > bruteLast.n }.map { n -> bruteLast.brute!! * work(n) / work(bruteLast.n) }
+            .takeWhile { it <= BRUTE_DRAW_MAX_MS }
         val timeChart = lineChart(
             title = "장소 수별 계산 시간 (PC 측정, 중앙값)", xLabel = "장소 수 n", xs = NS.map { "$it" }, yLabel = "",
             subtitle = "세로축 한 칸 = 10배. 점선은 추정(n!에 비례), 1ms 아래 엇갈림은 측정 잡음",
             series = listOf(
                 Series(
                     "완전 탐색", 0, bruteRows.map { it.brute!! },
-                    label = "완전 탐색: ${NS.last()}곳이면 약 ${duration(bruteAll.last())} (추정)", estimate = bruteEstimate,
+                    label = "완전 탐색 (추정)", estimate = bruteEstimate,
                 ),
                 Series("Held-Karp", 1, rows.filter { it.hk != null }.map { it.hk!! }),
                 Series("근사", 2, rows.map { it.heur }),
