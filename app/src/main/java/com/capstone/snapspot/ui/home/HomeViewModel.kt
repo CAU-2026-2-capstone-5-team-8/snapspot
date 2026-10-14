@@ -306,7 +306,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     /** Shows the alert a branch would send, using the nearest registered branch of this brand. */
     fun testCoupon(cp: Coupon) = viewModelScope.launch {
         val key = brandKey(cp.brand)
-        val id = window.value?.branches?.keys?.firstOrNull { it.startsWith("b|$key|") } ?: "b|$key|test"
+        // The nearest registered branch, like the alert the user would get walking by.
+        val at = here.value
+        val id = window.value?.branches?.filter { it.key.startsWith("b|$key|") }
+            ?.minByOrNull { (_, b) -> at?.let { distanceMeters(it, Coords(b.latitude, b.longitude)) } ?: 0.0 }?.key
+            ?: "b|$key|test"
         c.alerts.onBranchEnter(id, force = true)
     }
 

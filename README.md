@@ -10,13 +10,13 @@
 두 경우 모두 **앱이 꺼져 있어도** 동작해요.
 
 <p>
-  <img src="docs/screenshots/home.png" width="180" alt="홈. 둥근 지도 카드에 성수역 주변 스타벅스 지점 배지가 보이고, 200m 안의 지점은 노랗게 표시된다. 아래 기프티콘 탭에 '지금 근처: 스타벅스 성수점' 띠와 D-79가 붙은 기프티콘 카드" />
-  <img src="docs/screenshots/coupon-add.png" width="180" alt="새 기프티콘 확인. 브랜드 스타벅스, 혜택, 유효기간과 근처 지점 미리보기" />
-  <img src="docs/screenshots/coupon-open.png" width="180" alt="알림을 눌러 연 기프티콘. 바코드가 보이도록 기프티콘 이미지를 크게 띄우고 아래에 '사용했어요' 버튼" />
-  <img src="docs/screenshots/status.png" width="180" alt="알림 현황. 90칸 중 스타벅스 지점 7칸, 갱신 구역 1칸, 빈 칸 82칸" />
+  <img src="docs/screenshots/home.png" width="180" alt="홈. 화면 전체 지도에 저장한 장소 핀과 알림 반경 원, 선물 상자 모양의 스타벅스 지점 핀. 아래 시트에 '근처에 가 볼 곳이 2곳 있어요', 성수동 코스 카드, 라임색 '지금 근처' 표시가 붙은 장소 목록" />
+  <img src="docs/screenshots/coupon-add.png" width="180" alt="새 기프티콘 확인. '기프티콘에서 찾았어요 · 스타벅스', 브랜드·받을 수 있는 것·유효기간 칸과 '근처 스타벅스에 가면 알려 드려요' 안내" />
+  <img src="docs/screenshots/coupon-open.png" width="180" alt="기프티콘 화면. 위에 라임색 '지금 근처 · 스타벅스 스탈릿성수N점 197m', 바코드가 보이도록 기프티콘 이미지를 크게 띄우고 아래에 '사용했어요' 버튼" />
+  <img src="docs/screenshots/status.png" width="180" alt="알림 현황. '알림 장소 12곳', 90칸 중 13칸 사용(저장한 장소 5칸, 스타벅스 지점 7칸, 갱신 구역 1칸)과 등록된 곳을 보여 주는 지도" />
 </p>
 <p>
-  <img src="docs/screenshots/coupon-alert.png" width="370" alt="알림 '스타벅스 성수점 근처예요 · 스타벅스 카페 아메리카노 Tall · 12월 31일까지'" />
+  <img src="docs/screenshots/coupon-alert.png" width="370" alt="알림 '스타벅스 스탈릿성수N점 근처예요 · 스타벅스 카페 아메리카노 Tall · 12월 31일까지'" />
 </p>
 
 ## 핵심 문제: 휴대폰은 90곳까지만 알림을 걸 수 있어요
@@ -181,8 +181,8 @@
 - **동선 길이**: Held-Karp는 정답이라 늘 가장 짧아요(0%). 2-opt·Or-opt는 정답보다 몇 % 길 수 있어요.
 - 그래서 기준은 "어느 쪽이 빠른가"가 아니라 **"정답을 한도 안에 낼 수 있는가"**예요. Held-Karp가 한도에 닿는 12~13곳보다 한 칸 여유를 두고 11곳까지 Held-Karp를 쓰고, 12곳부터 2-opt·Or-opt로 바꿔요.
 <p>
-  <img src="docs/screenshots/bundle-route.png" width="180" alt="성수동 묶음을 펼친 홈. 내 위치에서 1~4번 장소를 잇는 동선과 번호 핀" />
-  <img src="docs/screenshots/bundle-coupon.png" width="180" alt="기프티콘 포함을 켠 동선. 3번과 5번 사이 동선 위의 스타벅스 지점이 4번으로 들어감" />
+  <img src="docs/screenshots/bundle-route.png" width="180" alt="성수동 코스를 연 화면. 알림 반경 원은 숨기고, 1~4번 장소를 실제 걷는 길로 잇는 동선과 '걸어서 11분'" />
+  <img src="docs/screenshots/bundle-coupon.png" width="180" alt="기프티콘 포함을 켠 동선. 3번과 5번 사이 동선 위의 스타벅스 성수역점이 흰 네모 4번으로 들어감" />
 </p>
 
 ## 브랜드 지점 찾기
