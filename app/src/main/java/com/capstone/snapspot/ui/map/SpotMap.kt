@@ -55,12 +55,15 @@ import com.kakao.vectormap.MapLifeCycleCallback
 import com.kakao.vectormap.MapView
 import com.kakao.vectormap.camera.CameraAnimation
 import com.kakao.vectormap.camera.CameraUpdateFactory
+import com.kakao.vectormap.label.Label
 import com.kakao.vectormap.label.LabelOptions
 import com.kakao.vectormap.label.LabelStyle
 import com.kakao.vectormap.label.LabelStyles
 import com.kakao.vectormap.shape.MapPoints
+import com.kakao.vectormap.shape.Polygon
 import com.kakao.vectormap.shape.PolygonOptions
 import com.kakao.vectormap.shape.PolygonStyles
+import com.kakao.vectormap.shape.Polyline
 import com.kakao.vectormap.shape.PolylineOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -198,9 +201,10 @@ fun SpotMap(
         val loaded = withContext(Dispatchers.IO) { missing.mapNotNull { u -> pinPhoto(ctx, u, px)?.let { u to it } }.toMap() }
         photos = photos + loaded
     }
+    val overlays = remember(map) { Overlays() }
     LaunchedEffect(map, places, branches, here, refresh, route, photos) {
         val m = map ?: return@LaunchedEffect
-        draw(m, places, branches, here, refresh, route, density, face, photos)
+        draw(m, overlays, places, branches, here, refresh, route, density, face, photos)
     }
     LaunchedEffect(map, interactive) {
         val m = map ?: return@LaunchedEffect
@@ -261,44 +265,83 @@ private fun circle(center: Coords, radiusM: Double): MapPoints {
     return MapPoints.fromLatLng(pts)
 }
 
+/**
+ * What is on the map now, so a redraw touches only what changed. Clearing and re-adding everything left the
+ * map bare for a moment (seconds on a slow device) each time a route opened or its walking path arrived:
+ * pins are uploaded to the renderer as new bitmaps. Unchanged pins stay; a changed one is replaced by a new
+ * label (a fresh id, since the old one is still there) before the old one goes; shapes are added before the
+ * previous ones are removed.
+ */
+private class Overlays {
+    val labels = HashMap<String, Pair<Any, Label>>()
+    var polygons: List<Polygon> = emptyList()
+    var lines: List<Polyline> = emptyList()
+    var gen = 0L
+}
+
 private fun draw(
-    m: KakaoMap, places: List<MapPlace>, branches: List<MapBranch>, here: Coords?, refresh: Pair<Coords, Double>?,
+    m: KakaoMap, o: Overlays, places: List<MapPlace>, branches: List<MapBranch>, here: Coords?, refresh: Pair<Coords, Double>?,
     route: List<Coords>, density: Float, face: Typeface, photos: Map<String, Bitmap>,
 ) {
     val shapes = m.shapeManager?.layer ?: return
     val labels = m.labelManager?.layer ?: return
-    shapes.removeAll()
-    labels.removeAll()
+    o.gen++
 
-    refresh?.let { (c, r) ->
-        shapes.addPolygon(PolygonOptions.from(circle(c, r), PolygonStyles.from(REFRESH_AREA.fill.toArgb(), 1.5f * density, REFRESH_AREA.stroke.toArgb())))
+    val polygons = buildList {
+        refresh?.let { (c, r) ->
+            add(shapes.addPolygon(PolygonOptions.from(circle(c, r), PolygonStyles.from(REFRESH_AREA.fill.toArgb(), 1.5f * density, REFRESH_AREA.stroke.toArgb()))))
+        }
+        for (p in places) {
+            if (p.radiusM <= 0) continue
+            val s = radiusStyle(p)
+            add(shapes.addPolygon(PolygonOptions.from(circle(p.at, p.radiusM), PolygonStyles.from(s.fill.toArgb(), 1.5f * density, s.stroke.toArgb()))))
+        }
     }
-    for (p in places) {
-        if (p.radiusM <= 0) continue
-        val s = radiusStyle(p)
-        shapes.addPolygon(PolygonOptions.from(circle(p.at, p.radiusM), PolygonStyles.from(s.fill.toArgb(), 1.5f * density, s.stroke.toArgb())))
-    }
-    if (route.size >= 2) {
-        shapes.addPolyline(PolylineOptions.from(MapPoints.fromLatLng(route.map { latLng(it) }), 3f * density, SnapColors.ink.toArgb()))
+    val lines = if (route.size >= 2) {
+        listOf(shapes.addPolyline(PolylineOptions.from(MapPoints.fromLatLng(route.map { latLng(it) }), 3f * density, SnapColors.ink.toArgb())))
+    } else emptyList()
+    o.polygons.forEach(shapes::remove)
+    o.lines.forEach(shapes::remove)
+    o.polygons = polygons
+    o.lines = lines
+
+    /** `key` is everything the label looks like; the same key keeps the label already there. */
+    val keep = HashSet<String>()
+    fun put(id: String, key: Any, options: () -> LabelOptions) {
+        keep += id
+        val old = o.labels[id]
+        if (old?.first == key) return
+        o.labels[id] = key to labels.addLabel(options())
+        old?.second?.let { labels.remove(it) }
     }
     for (b in branches) {
-        val bmp = badge(branchPin(b), density, face)
-        labels.addLabel(LabelOptions.from(b.id, latLng(b.at)).setStyles(LabelStyles.from(LabelStyle.from(bmp).setAnchorPoint(0.5f, 0.5f))).setTag(b.id).setClickable(true))
+        val s = branchPin(b)
+        put(b.id, s to b.at) {
+            LabelOptions.from("${b.id}#${o.gen}", latLng(b.at)).setStyles(LabelStyles.from(LabelStyle.from(badge(s, density, face)).setAnchorPoint(0.5f, 0.5f)))
+                .setTag(b.id).setClickable(true)
+        }
     }
     for (p in places) {
         val s = placePin(p)
-        val bmp = badge(s, density, face, s.photo?.let { photos[it] })
-        labels.addLabel(
-            LabelOptions.from(p.id, latLng(p.at)).setStyles(LabelStyles.from(LabelStyle.from(bmp).setAnchorPoint(0.5f, 0.5f)))
-                // Numbered route pins sit above the user's dot (rank 20), so standing on stop 1 does not hide its number.
-                .setTag(p.id).setClickable(true).setRank(if (p.number != null) 30 else if (p.selected) 10 else 5),
-        )
+        val photo = s.photo?.let { photos[it] }
+        // Numbered route pins sit above the user's dot (rank 20), so standing on stop 1 does not hide its number.
+        val rank = if (p.number != null) 30L else if (p.selected) 10L else 5L
+        put(p.id, listOf(s, photo, p.at, rank)) {
+            LabelOptions.from("${p.id}#${o.gen}", latLng(p.at)).setStyles(LabelStyles.from(LabelStyle.from(badge(s, density, face, photo)).setAnchorPoint(0.5f, 0.5f)))
+                .setTag(p.id).setClickable(true).setRank(rank)
+        }
     }
     here?.let {
-        val bmp = badge(ME_PIN, density, face)
-        labels.addLabel(LabelOptions.from("me", latLng(it)).setStyles(LabelStyles.from(LabelStyle.from(bmp).setAnchorPoint(0.5f, 0.5f))).setRank(20))
+        put(ME_ID, it) {
+            LabelOptions.from("$ME_ID#${o.gen}", latLng(it)).setStyles(LabelStyles.from(LabelStyle.from(badge(ME_PIN, density, face)).setAnchorPoint(0.5f, 0.5f))).setRank(20)
+        }
     }
+    val gone = o.labels.keys - keep
+    for (id in gone) o.labels.remove(id)?.second?.let { labels.remove(it) }
 }
+
+/** The user's dot; place and branch ids never take this form. */
+private const val ME_ID = "me"
 
 /** Draws a [PinStyle]: ring, then fill inset by the ring width, then the photo, text or icon inside. */
 private fun badge(s: PinStyle, density: Float, face: Typeface, photo: Bitmap? = null): Bitmap {
