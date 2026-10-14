@@ -65,7 +65,7 @@ class AddLogicTest {
     fun `coupon built from a draft defaults the benefit and keeps a valid date`() {
         val c = buildCoupon(Draft(stage = Stage.READY, kind = "coupon", imageUri = "u", brand = " 스타벅스 ", benefit = "", endDate = "2026-12-31"), "c_1", NOW)!!
         assertEquals("스타벅스", c.brand)
-        assertEquals("쿠폰", c.benefit)
+        assertEquals("기프티콘", c.benefit)
         assertEquals("2026-12-31", c.expiresAt)
     }
 }

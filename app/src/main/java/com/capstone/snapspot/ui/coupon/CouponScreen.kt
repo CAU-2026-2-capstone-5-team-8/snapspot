@@ -85,15 +85,15 @@ fun CouponScreen(vm: HomeViewModel, id: String, onClose: () -> Unit) {
                         onClick = { menu = false; vm.testCoupon(c) },
                     )
                     DropdownMenuItem(
-                        text = { Text("쿠폰 삭제", style = SnapType.body.copy(color = SnapColors.danger)) },
+                        text = { Text("기프티콘 삭제", style = SnapType.body.copy(color = SnapColors.danger)) },
                         onClick = { menu = false; confirmDelete = true },
                     )
                 }
             }
         }
         if (c == null) {
-            BigTitle(null, "쿠폰을 찾지 못했어요", Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            Text("삭제했거나 다른 기기에서 추가한 쿠폰일 수 있어요.", style = SnapType.meta, modifier = Modifier.padding(horizontal = 20.dp))
+            BigTitle(null, "기프티콘을 찾지 못했어요", Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            Text("삭제했거나 다른 기기에서 추가한 기프티콘일 수 있어요.", style = SnapType.meta, modifier = Modifier.padding(horizontal = 20.dp))
             return@Column
         }
 
@@ -104,7 +104,7 @@ fun CouponScreen(vm: HomeViewModel, id: String, onClose: () -> Unit) {
             BigTitle(c.brand, c.benefit, Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
             Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (c.usedAt != null) "사용한 쿠폰이에요" else untilLabel(c.expiresAt) ?: "유효기간 없음",
+                    if (c.usedAt != null) "사용한 기프티콘이에요" else untilLabel(c.expiresAt) ?: "유효기간 없음",
                     style = SnapType.body.copy(color = SnapColors.ink2),
                     modifier = Modifier.weight(1f),
                 )
@@ -135,14 +135,14 @@ fun CouponScreen(vm: HomeViewModel, id: String, onClose: () -> Unit) {
             if (active) {
                 PrimaryButton("사용했어요", { vm.markUsed(c); onClose() }, Modifier.fillMaxWidth())
             } else {
-                SecondaryButton("쿠폰 삭제", { confirmDelete = true }, Modifier.fillMaxWidth())
+                SecondaryButton("기프티콘 삭제", { confirmDelete = true }, Modifier.fillMaxWidth())
             }
         }
     }
 
     if (confirmDelete && c != null) {
         ConfirmDelete(
-            "${c.brand} 쿠폰 삭제", "이 쿠폰의 지점 알림도 함께 꺼져요.",
+            "${c.brand} 기프티콘 삭제", "이 기프티콘의 지점 알림도 함께 꺼져요.",
             onConfirm = { confirmDelete = false; onClose(); vm.deleteCoupon(c) },
             onDismiss = { confirmDelete = false },
         )

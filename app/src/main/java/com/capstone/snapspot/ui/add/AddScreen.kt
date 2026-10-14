@@ -147,7 +147,7 @@ fun AddScreen(
             ) {
                 if (many) SecondaryButton("건너뛰기", onClick = vm::skip, modifier = Modifier.weight(1f))
                 PrimaryButton(
-                    if (isCoupon) "쿠폰함에 저장" else "지도에 저장",
+                    if (isCoupon) "기프티콘 저장" else "지도에 저장",
                     onClick = { save() },
                     enabled = if (isCoupon) d.brand.isNotBlank() else d.coords != null,
                     modifier = Modifier.weight(2f),
@@ -184,8 +184,8 @@ fun AddScreen(
         )
         is SaveResult.DuplicateCoupon -> AlertDialog(
             onDismissRequest = { duplicate = null },
-            title = { Text("같은 쿠폰이 이미 있어요", style = SnapType.title) },
-            text = { Text("${dup.existing.brand} ${dup.existing.benefit} 쿠폰이 쿠폰함에 있어요. 같은 쿠폰을 한 장 더 가지고 있다면 그래도 추가할 수 있어요.", style = SnapType.body) },
+            title = { Text("같은 기프티콘이 이미 있어요", style = SnapType.title) },
+            text = { Text("${dup.existing.brand} ${dup.existing.benefit} 기프티콘이 이미 저장돼 있어요. 같은 기프티콘을 한 장 더 가지고 있다면 그래도 추가할 수 있어요.", style = SnapType.body) },
             confirmButton = {
                 Row {
                     TextButton(onClick = { duplicate = null; save(allowDuplicate = true) }) { Text("그래도 추가", style = SnapType.button, color = SnapColors.ink2) }

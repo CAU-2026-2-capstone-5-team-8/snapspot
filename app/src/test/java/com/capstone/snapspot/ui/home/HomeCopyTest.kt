@@ -67,7 +67,7 @@ class HomeCopyTest {
     fun `coupon meta prefers the nearest branch`() {
         val c = coupon(benefit = "아메리카노 1+1")
         assertEquals("아메리카노 1+1 · 성수역점 ${formatDistance(320.0)}", couponMeta(CouponItem(c, active = true, urgent = false, nearest = "성수역점" to 320.0)))
-        assertEquals("사용한 쿠폰이에요", couponMeta(CouponItem(coupon(usedAt = 1L), active = false, urgent = false, nearest = null)))
+        assertEquals("사용한 기프티콘이에요", couponMeta(CouponItem(coupon(usedAt = 1L), active = false, urgent = false, nearest = null)))
         assertEquals("기간이 지났어요", couponMeta(CouponItem(c, active = false, urgent = false, nearest = null)))
         assertEquals("아메리카노 1+1 · 12월 31일까지", couponMeta(CouponItem(coupon(benefit = "아메리카노 1+1", expiresAt = "2026-12-31"), active = true, urgent = false, nearest = null)))
     }

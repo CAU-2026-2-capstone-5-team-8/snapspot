@@ -95,8 +95,8 @@ fun LargeShot(uri: String?, modifier: Modifier = Modifier) {
     }
     Box(modifier.fillMaxWidth().heightIn(min = 200.dp), contentAlignment = Alignment.Center) {
         val img = image
-        if (img != null) Image(img, contentDescription = "쿠폰 이미지", contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth())
-        else Text(if (uri == null) "쿠폰 이미지가 없어요" else "", style = SnapType.meta)
+        if (img != null) Image(img, contentDescription = "기프티콘 이미지", contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth())
+        else Text(if (uri == null) "기프티콘 이미지가 없어요" else "", style = SnapType.meta)
     }
 }
 

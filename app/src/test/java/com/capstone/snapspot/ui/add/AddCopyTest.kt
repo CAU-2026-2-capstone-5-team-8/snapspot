@@ -21,7 +21,7 @@ class AddCopyTest {
 
     @Test
     fun `kicker names where the details came from`() {
-        assertEquals("쿠폰에서 찾았어요", foundKicker("coupon", isPlace = false))
+        assertEquals("기프티콘에서 찾았어요", foundKicker("coupon", isPlace = false))
         assertEquals("스크린샷에서 찾았어요", foundKicker("place", isPlace = true))
         assertEquals("장소를 찾기 어려웠어요", foundKicker("place", isPlace = false))
     }

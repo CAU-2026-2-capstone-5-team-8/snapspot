@@ -44,9 +44,9 @@ class BatchTest {
 
     @Test
     fun `summary says what was saved`() {
-        assertEquals("장소 2곳, 쿠폰 1장을 저장했어요", batchSummary(batch(3).next("place").next("place").next("coupon")))
+        assertEquals("장소 2곳, 기프티콘 1장을 저장했어요", batchSummary(batch(3).next("place").next("place").next("coupon")))
         assertEquals("장소 1곳을 저장했어요", batchSummary(batch(2).next("place").next(null)))
-        assertEquals("쿠폰 2장을 저장했어요", batchSummary(batch(2).next("coupon").next("coupon")))
+        assertEquals("기프티콘 2장을 저장했어요", batchSummary(batch(2).next("coupon").next("coupon")))
         assertEquals("저장한 것이 없어요", batchSummary(batch(2).next(null).next(null)))
     }
 }

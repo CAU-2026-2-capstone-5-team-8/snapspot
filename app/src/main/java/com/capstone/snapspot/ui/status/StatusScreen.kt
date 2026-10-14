@@ -99,7 +99,7 @@ fun StatusScreen(vm: HomeViewModel, onBack: () -> Unit, onAskPermissions: () -> 
                     }
                     SlotMeter(MAX_REGIONS, parts)
                     Text(
-                        "휴대폰은 한 번에 ${MAX_REGIONS}곳까지만 알림을 걸 수 있어요. 저장한 장소를 먼저, 그다음 유효기간이 임박한 쿠폰 순으로 담아요. " +
+                        "휴대폰은 한 번에 ${MAX_REGIONS}곳까지만 알림을 걸 수 있어요. 저장한 장소를 먼저, 그다음 유효기간이 임박한 기프티콘 순으로 담아요. " +
                             "지금 위치에서 ${(REFRESH_RADIUS_M / 1000).toInt()}km를 벗어나면 그 자리에서 다시 골라요.",
                         style = SnapType.meta,
                     )

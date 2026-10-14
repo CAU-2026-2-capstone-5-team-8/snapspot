@@ -50,7 +50,7 @@ fun placeMeta(p: Place, ended: Boolean): String =
 fun couponMeta(item: CouponItem): String {
     val c = item.coupon
     return when {
-        c.usedAt != null -> "사용한 쿠폰이에요"
+        c.usedAt != null -> "사용한 기프티콘이에요"
         !item.active -> "기간이 지났어요"
         item.nearest != null -> "${c.benefit} · ${item.nearest.first} ${formatDistance(item.nearest.second)}"
         else -> listOfNotNull(c.benefit.ifBlank { null }, untilLabel(c.expiresAt)).joinToString(" · ").ifBlank { "유효기간 없음" }

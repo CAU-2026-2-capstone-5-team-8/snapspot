@@ -13,7 +13,7 @@ fun matchLabel(matched: Candidate?, hasCoords: Boolean): String = when {
 
 /** The small line above the found name. */
 fun foundKicker(kind: String, isPlace: Boolean): String = when {
-    kind == "coupon" -> "쿠폰에서 찾았어요"
+    kind == "coupon" -> "기프티콘에서 찾았어요"
     isPlace -> "스크린샷에서 찾았어요"
     else -> "장소를 찾기 어려웠어요"
 }

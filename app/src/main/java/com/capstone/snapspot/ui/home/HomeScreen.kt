@@ -239,14 +239,14 @@ fun HomeScreen(
                                 options = Tab.entries,
                                 value = tab,
                                 onChange = { tab = it },
-                                format = { if (it == Tab.PLACES) "장소 ${places.size}" else "쿠폰 ${coupons.count { c -> c.active }}" },
+                                format = { if (it == Tab.PLACES) "장소 ${places.size}" else "기프티콘 ${coupons.count { c -> c.active }}" },
                                 modifier = Modifier.padding(bottom = SnapSpace.gap),
                             )
                         }
                         if (tab == Tab.PLACES) {
                             if (places.isEmpty()) item(key = "empty") {
                                 if (coupons.isEmpty()) Empty("스크린샷 한 장으로 시작해 보세요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요.")
-                                else Empty("저장한 장소가 없어요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요. 쿠폰은 쿠폰 탭에 있어요.")
+                                else Empty("저장한 장소가 없어요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요. 기프티콘은 기프티콘 탭에 있어요.")
                             }
                             itemsIndexed(places, key = { _, p -> p.id }) { i, p ->
                                 PlaceRow(
@@ -256,7 +256,7 @@ fun HomeScreen(
                                 )
                             }
                         } else {
-                            if (coupons.isEmpty()) item(key = "empty") { Empty("저장한 쿠폰이 없어요", "기프티콘 스크린샷을 넣으면 그 브랜드 지점 근처에서 알려 드려요.") }
+                            if (coupons.isEmpty()) item(key = "empty") { Empty("저장한 기프티콘이 없어요", "기프티콘 스크린샷을 넣으면 그 브랜드 지점 근처에서 알려 드려요.") }
                             itemsIndexed(coupons, key = { _, c -> c.coupon.id }) { i, item ->
                                 TicketRow(item, now, groupShape(i, coupons.size), onClick = { onCoupon(item.coupon.id) }, onLongClick = { deletingCoupon = item.coupon })
                             }
@@ -265,7 +265,7 @@ fun HomeScreen(
                         item(key = "bundle-head") {
                             Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp, bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
                                 BigTitle("가 볼 곳 ${open.bundle.places.size}곳", "걸어서 ${walks[open.walkKey]?.minutes ?: open.minutes}분", Modifier.weight(1f))
-                                Text("쿠폰 포함", style = SnapType.label)
+                                Text("기프티콘 포함", style = SnapType.label)
                                 Gap(6.dp)
                                 Switch(
                                     checked = open.bundle.id in couponsOn,
@@ -279,7 +279,7 @@ fun HomeScreen(
                         }
                         if (open.couponsFailed) item(key = "bundle-failed") {
                             Notice(
-                                if (open.coupons.isEmpty()) "쿠폰 지점을 불러오지 못했어요" else "일부 쿠폰 지점을 불러오지 못했어요",
+                                if (open.coupons.isEmpty()) "기프티콘 지점을 불러오지 못했어요" else "일부 기프티콘 지점을 불러오지 못했어요",
                                 modifier = Modifier.padding(bottom = SnapSpace.gap),
                             )
                         }
@@ -292,7 +292,7 @@ fun HomeScreen(
                         }
                         item(key = "bundle-preview") {
                             Text(
-                                "알림 미리보기",
+                                "알림 미리 보기",
                                 style = SnapType.button.copy(color = SnapColors.ink2),
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(top = SnapSpace.gap).clip(SnapShapes.card)
@@ -354,7 +354,7 @@ fun HomeScreen(
         ConfirmDelete("${p.name} 삭제", "이 장소의 근처 알림도 함께 꺼져요.", onConfirm = { vm.deletePlace(p); deletingPlace = null }, onDismiss = { deletingPlace = null })
     }
     deletingCoupon?.let { cp ->
-        ConfirmDelete("${cp.brand} 쿠폰 삭제", "이 쿠폰의 지점 알림도 함께 꺼져요.", onConfirm = { vm.deleteCoupon(cp); deletingCoupon = null }, onDismiss = { deletingCoupon = null })
+        ConfirmDelete("${cp.brand} 기프티콘 삭제", "이 기프티콘의 지점 알림도 함께 꺼져요.", onConfirm = { vm.deleteCoupon(cp); deletingCoupon = null }, onDismiss = { deletingCoupon = null })
     }
 }
 
@@ -458,7 +458,7 @@ private fun StopRow(number: Int, stop: RouteStop, place: Place?, near: Boolean, 
         if (place != null) Shot(place.imageUri, 40.dp, 40.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(stop.name, style = SnapType.title.copy(fontSize = 15.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(if (place != null) place.category else "쿠폰 · ${stop.brand.orEmpty()}", style = SnapType.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (place != null) place.category else "기프티콘 · ${stop.brand.orEmpty()}", style = SnapType.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (near) NearChip()
     }
