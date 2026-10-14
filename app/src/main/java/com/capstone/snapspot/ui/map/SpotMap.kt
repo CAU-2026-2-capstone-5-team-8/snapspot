@@ -1,10 +1,18 @@
 package com.capstone.snapspot.ui.map
 
+import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
+import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -35,6 +43,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.capstone.snapspot.R
 import com.capstone.snapspot.SnapSpotApp
 import com.capstone.snapspot.core.Coords
+import com.capstone.snapspot.image.focusCrop
 import com.capstone.snapspot.ui.components.MapUnavailable
 import com.capstone.snapspot.ui.theme.SnapColors
 import com.capstone.snapspot.ui.theme.SnapShapes
@@ -53,6 +62,8 @@ import com.kakao.vectormap.shape.MapPoints
 import com.kakao.vectormap.shape.PolygonOptions
 import com.kakao.vectormap.shape.PolygonStyles
 import com.kakao.vectormap.shape.PolylineOptions
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -64,7 +75,8 @@ data class MapPlace(
     val id: String,
     val at: Coords,
     val radiusM: Double,
-    val initial: String,
+    /** The place's screenshot (content URI), shown inside its pin. */
+    val photo: String?,
     val ended: Boolean,
     val selected: Boolean,
     val number: Int? = null,
@@ -159,9 +171,19 @@ fun SpotMap(
         }
     }
 
-    LaunchedEffect(map, places, branches, here, refresh, route) {
+    // Screenshots for the pins, cropped and decoded once off the main thread; pins without one yet draw a glyph.
+    var photos by remember { mutableStateOf<Map<String, Bitmap>>(emptyMap()) }
+    val photoUris = places.mapNotNull { it.photo }.toSet()
+    LaunchedEffect(photoUris) {
+        val missing = photoUris - photos.keys
+        if (missing.isEmpty()) return@LaunchedEffect
+        val px = (PHOTO_PIN_DP * density).toInt()
+        val loaded = withContext(Dispatchers.IO) { missing.mapNotNull { u -> pinPhoto(ctx, u, px)?.let { u to it } }.toMap() }
+        photos = photos + loaded
+    }
+    LaunchedEffect(map, places, branches, here, refresh, route, photos) {
         val m = map ?: return@LaunchedEffect
-        draw(m, places, branches, here, refresh, route, density, face)
+        draw(m, places, branches, here, refresh, route, density, face, photos)
     }
     LaunchedEffect(map, interactive) {
         val m = map ?: return@LaunchedEffect
@@ -217,7 +239,7 @@ private fun circle(center: Coords, radiusM: Double): MapPoints {
 
 private fun draw(
     m: KakaoMap, places: List<MapPlace>, branches: List<MapBranch>, here: Coords?, refresh: Pair<Coords, Double>?,
-    route: List<Coords>, density: Float, face: Typeface,
+    route: List<Coords>, density: Float, face: Typeface, photos: Map<String, Bitmap>,
 ) {
     val shapes = m.shapeManager?.layer ?: return
     val labels = m.labelManager?.layer ?: return
@@ -240,7 +262,8 @@ private fun draw(
         labels.addLabel(LabelOptions.from(b.id, latLng(b.at)).setStyles(LabelStyles.from(LabelStyle.from(bmp).setAnchorPoint(0.5f, 0.5f))).setTag(b.id).setClickable(true))
     }
     for (p in places) {
-        val bmp = badge(placePin(p), density, face)
+        val s = placePin(p)
+        val bmp = badge(s, density, face, s.photo?.let { photos[it] })
         labels.addLabel(
             LabelOptions.from(p.id, latLng(p.at)).setStyles(LabelStyles.from(LabelStyle.from(bmp).setAnchorPoint(0.5f, 0.5f)))
                 // Numbered route pins sit above the user's dot (rank 20), so standing on stop 1 does not hide its number.
@@ -253,8 +276,8 @@ private fun draw(
     }
 }
 
-/** Draws a [PinStyle]: ring, then fill inset by the ring width, then the text centered. */
-private fun badge(s: PinStyle, density: Float, face: Typeface): Bitmap {
+/** Draws a [PinStyle]: ring, then fill inset by the ring width, then the photo, text or icon inside. */
+private fun badge(s: PinStyle, density: Float, face: Typeface, photo: Bitmap? = null): Bitmap {
     val size = (s.sizeDp * density).toInt()
     val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp)
@@ -278,8 +301,56 @@ private fun badge(s: PinStyle, density: Float, face: Typeface): Bitmap {
         p.textSize = size * 0.46f
         c.drawText(s.text, half, half - (p.descent() + p.ascent()) / 2, p)
     }
-    if (s.icon) gift(c, half, half, size * 0.56f, s.textColor.toArgb())
+    if (photo != null) {
+        val inset = s.ringDp * density
+        val r = half - inset
+        val m = Matrix().apply {
+            val k = 2 * r / photo.width
+            setScale(k, k)
+            postTranslate(inset, inset)
+        }
+        val pp = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        pp.shader = BitmapShader(photo, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(m) }
+        if (s.grey) pp.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
+        c.drawCircle(half, half, r, pp)
+    } else when (s.icon) {
+        PinIcon.GIFT -> gift(c, half, half, size * 0.56f, s.textColor.toArgb())
+        PinIcon.PLACE -> placeGlyph(c, half, half, size * 0.5f, s.textColor.toArgb(), s.fill.toArgb())
+        PinIcon.NONE -> Unit
+    }
     return bmp
+}
+
+/** Photo pins are this big when selected; screenshots are cropped and scaled to it once. */
+private const val PHOTO_PIN_DP = 42
+
+/** A square from a screenshot for a pin, `px` wide, centered on the screenshot's picture ([focusCrop]). */
+private fun pinPhoto(ctx: Context, uri: String, px: Int): Bitmap? = runCatching {
+    val u = Uri.parse(uri)
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    ctx.contentResolver.openInputStream(u).use { BitmapFactory.decodeStream(it, null, bounds) }
+    var sample = 1
+    while (minOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= px * 2) sample *= 2
+    val full = ctx.contentResolver.openInputStream(u).use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
+        ?: return null
+    Bitmap.createScaledBitmap(focusCrop(full, 1f), px, px, true)
+}.getOrNull()
+
+/** A map pin (round head with a hole, pointed tail) `w` tall, centered on (cx, cy); `hole` is the fill behind it. */
+private fun placeGlyph(c: Canvas, cx: Float, cy: Float, w: Float, color: Int, hole: Int) {
+    val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
+    val r = w * 0.32f
+    val headY = cy - w * 0.14f
+    val tail = android.graphics.Path().apply {
+        moveTo(cx - r * 0.86f, headY + r * 0.5f)
+        lineTo(cx, cy + w * 0.5f)
+        lineTo(cx + r * 0.86f, headY + r * 0.5f)
+        close()
+    }
+    c.drawPath(tail, p)
+    c.drawCircle(cx, headY, r, p)
+    p.color = hole
+    c.drawCircle(cx, headY, r * 0.4f, p)
 }
 
 /** A gift box outline (lid, body, ribbon, bow) `w` wide, centered on (cx, cy): coupon branches carry it instead of a letter. */

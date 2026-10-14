@@ -65,6 +65,7 @@ import com.capstone.snapspot.ui.components.BigTitle
 import com.capstone.snapspot.ui.components.Field
 import com.capstone.snapspot.ui.components.IconTap
 import com.capstone.snapspot.ui.components.Notice
+import com.capstone.snapspot.ui.components.PhotoShot
 import com.capstone.snapspot.ui.components.PrimaryButton
 import com.capstone.snapspot.ui.components.SecondaryButton
 import com.capstone.snapspot.ui.components.Segmented
@@ -204,8 +205,9 @@ fun AddScreen(
 /** The screenshot across the screen, with how its place was found on a white chip. */
 @Composable
 private fun WideShot(uri: String?, label: String?) {
-    BoxWithConstraints(Modifier.fillMaxWidth().height(180.dp).clip(SnapShapes.card)) {
-        Shot(uri, maxWidth, maxHeight, shape = RectangleShape)
+    // The screenshot's picture in full (a post's photo, a poster), not a fixed-height slice of its middle.
+    Box(Modifier.fillMaxWidth().clip(SnapShapes.card)) {
+        PhotoShot(uri, minHeight = 160.dp, maxHeight = 340.dp)
         label?.let {
             Text(
                 it,
@@ -260,7 +262,7 @@ private fun PlaceForm(vm: AddViewModel, d: Draft) {
         d.coords?.let { at ->
             // The chosen radius, drawn right away on a small map.
             SpotMap(
-                places = listOf(MapPlace("draft", at, d.radius.toDouble(), d.name.firstOrNull()?.toString() ?: "?", ended = false, selected = true)),
+                places = listOf(MapPlace("draft", at, d.radius.toDouble(), d.imageUri.ifEmpty { null }, ended = false, selected = true)),
                 branches = emptyList(),
                 here = here,
                 focus = MapFocus(at, d.radius.toLong(), zoomFor(d.radius)),

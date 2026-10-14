@@ -98,7 +98,6 @@ private enum class Tab { PLACES, COUPONS }
 internal fun collapsedListPadding(sheetHeight: androidx.compose.ui.unit.Dp, peek: androidx.compose.ui.unit.Dp, collapsed: Boolean) =
     if (collapsed) (sheetHeight - peek).coerceAtLeast(0.dp) else 0.dp
 
-private fun initial(s: String) = s.trim().firstOrNull()?.toString() ?: "?"
 
 /** Rows of one list share a card: only the first and last rows round their outer corners. */
 private fun groupShape(i: Int, n: Int): Shape {
@@ -167,12 +166,12 @@ fun HomeScreen(
     val mapPlaces = places.map {
         MapPlace(
             // An open route shows the line and numbered stops only: alert circles would clutter it.
-            it.id, Coords(it.latitude, it.longitude), if (open != null) 0.0 else it.radius.toDouble(), initial(it.name), placeEnded(it, now),
+            it.id, Coords(it.latitude, it.longitude), if (open != null) 0.0 else it.radius.toDouble(), it.imageUri, placeEnded(it, now),
             it.id == selected, numberOf[it.id], near = it.id in near,
         )
     } + stops.mapIndexedNotNull { i, st ->
         if (st.placeId != null) null
-        else MapPlace("route-$i", st.at, 0.0, initial(st.name), ended = false, selected = false, number = i + 1, couponStop = true)
+        else MapPlace("route-$i", st.at, 0.0, null, ended = false, selected = false, number = i + 1, couponStop = true)
     }
     // Follows the streets once TMAP answers, straight lines until then.
     val routeLine = if (open == null) emptyList() else walks[open.walkKey]?.line ?: open.line

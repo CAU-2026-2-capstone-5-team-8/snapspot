@@ -6,16 +6,28 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 class PinsTest {
-    private fun place(near: Boolean = false, ended: Boolean = false, selected: Boolean = false, number: Int? = null, couponStop: Boolean = false) =
-        MapPlace("p", Coords(37.5, 127.0), 200.0, "어", ended, selected, number, near, couponStop)
+    private fun place(
+        near: Boolean = false, ended: Boolean = false, selected: Boolean = false, number: Int? = null, couponStop: Boolean = false,
+        photo: String? = "content://shot/1",
+    ) = MapPlace("p", Coords(37.5, 127.0), 200.0, photo, ended, selected, number, near, couponStop)
 
     @Test
-    fun `a saved place is an ink circle with its initial`() {
+    fun `a saved place shows its screenshot in a white-ringed circle, no letters`() {
         val s = placePin(place())
-        assertEquals("어", s.text)
-        assertEquals(SnapColors.ink, s.fill)
+        assertEquals("content://shot/1", s.photo)
+        assertEquals("", s.text)
+        assertEquals(PinIcon.NONE, s.icon)
         assertEquals(SnapColors.surface, s.ring)
         assertEquals(PinShape.CIRCLE, s.shape)
+        assertEquals(42, placePin(place(selected = true)).sizeDp)
+    }
+
+    @Test
+    fun `a place without a screenshot gets a map pin glyph on ink`() {
+        val s = placePin(place(photo = null))
+        assertEquals(PinIcon.PLACE, s.icon)
+        assertEquals(SnapColors.ink, s.fill)
+        assertEquals("", s.text)
     }
 
     @Test
@@ -26,6 +38,7 @@ class PinsTest {
     @Test
     fun `an ended place is grey even when near`() {
         val s = placePin(place(ended = true, near = true))
+        assertEquals(true, s.grey)
         assertEquals(SnapColors.muted, s.fill)
         assertEquals(SnapColors.surface, s.ring)
     }
@@ -52,7 +65,7 @@ class PinsTest {
         val b = MapBranch("b", Coords(37.5, 127.0), urgent = true, near = true)
         val s = branchPin(b)
         assertEquals(PinShape.SQUARE, s.shape)
-        assertEquals(true, s.icon)
+        assertEquals(PinIcon.GIFT, s.icon)
         assertEquals("", s.text)
         assertEquals(SnapColors.lime, s.fill)
         assertEquals(SnapColors.urgent, s.ring)

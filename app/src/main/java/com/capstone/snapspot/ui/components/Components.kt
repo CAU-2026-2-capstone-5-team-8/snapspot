@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -53,6 +54,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.capstone.snapspot.image.focusCrop
+import com.capstone.snapspot.image.photoOnly
 import com.capstone.snapspot.ui.theme.SnapColors
 import com.capstone.snapspot.ui.theme.SnapShapes
 import com.capstone.snapspot.ui.theme.SnapSpace
@@ -60,7 +63,10 @@ import com.capstone.snapspot.ui.theme.SnapType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** A saved screenshot, decoded small off the main thread. */
+/**
+ * A saved screenshot, decoded small off the main thread. Cropped to the box around the screenshot's picture
+ * (a post's photo, a place page's header), not its middle, which is often text.
+ */
 @Composable
 fun Shot(
     uri: String?,
@@ -71,16 +77,40 @@ fun Shot(
     shape: Shape = SnapShapes.small,
 ) {
     val ctx = LocalContext.current
-    val image by produceState<ImageBitmap?>(null, uri) {
+    val aspect = width.value / height.value
+    val image by produceState<ImageBitmap?>(null, uri, aspect) {
         value = if (uri == null) null else withContext(Dispatchers.IO) {
             runCatching {
                 val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
-                ctx.contentResolver.openInputStream(Uri.parse(uri)).use { BitmapFactory.decodeStream(it, null, opts) }?.asImageBitmap()
+                ctx.contentResolver.openInputStream(Uri.parse(uri)).use { BitmapFactory.decodeStream(it, null, opts) }
+                    ?.let { focusCrop(it, aspect) }?.asImageBitmap()
             }.getOrNull()
         }
     }
     Box(modifier.size(width, height).clip(shape).background(SnapColors.line), contentAlignment = Alignment.Center) {
         image?.let { Image(it, contentDescription = null, contentScale = contentScale, modifier = Modifier.fillMaxSize()) }
+    }
+}
+
+/** Just the picture of a screenshot at full width, as tall as the picture is (clamped to `minHeight..maxHeight`). */
+@Composable
+fun PhotoShot(uri: String?, minHeight: Dp, maxHeight: Dp, modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
+    val image by produceState<ImageBitmap?>(null, uri) {
+        value = if (uri == null) null else withContext(Dispatchers.IO) {
+            runCatching {
+                val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+                ctx.contentResolver.openInputStream(Uri.parse(uri)).use { BitmapFactory.decodeStream(it, null, opts) }
+                    ?.let { photoOnly(it) }?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val img = image
+        val h = if (img == null) minHeight else (maxWidth * (img.height.toFloat() / img.width)).coerceIn(minHeight, maxHeight)
+        Box(Modifier.fillMaxWidth().height(h).background(SnapColors.line)) {
+            img?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+        }
     }
 }
 
