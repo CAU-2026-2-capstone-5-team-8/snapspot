@@ -84,7 +84,7 @@ class RouteBench {
     @Test
     fun bench() {
         assumeTrue(System.getProperty("route.run") == "true", "run with ./gradlew :app:testDebugUnitTest -ProuteBench")
-        data class Row(val n: Int, val brute: Double?, val hk: Double?, val heur: Double, val gapNn: Double, val gap2: Double, val gapAll: Double, val vsMst: Boolean)
+        data class Row(val n: Int, val brute: Double?, val hk: Double?, val heur: Double, val gapNn: Double, val gap2: Double, val gapOr: Double, val gapAll: Double, val vsMst: Boolean)
         val rows = NS.map { n ->
             val cs = cases(n)
             // Slow sizes: a few cases and a short warm-up keep the whole run to minutes.
@@ -102,8 +102,9 @@ class RouteBench {
             }.average()
             Row(
                 n, brute, hk, heur,
-                gap { heuristicRoute(it.stops, it.start, twoOpt = false, orOpt = false).meters },
-                gap { heuristicRoute(it.stops, it.start, twoOpt = true, orOpt = false).meters },
+                gap { heuristicRoute(it.stops, it.start, twoOpt = false, orOpt = false, insertion = false).meters },
+                gap { heuristicRoute(it.stops, it.start, twoOpt = true, orOpt = false, insertion = false).meters },
+                gap { heuristicRoute(it.stops, it.start, insertion = false).meters },
                 gap { heuristicRoute(it.stops, it.start).meters },
                 vsMst,
             )
@@ -113,9 +114,9 @@ class RouteBench {
         fun ms(v: Double?) = v?.let { String.format(Locale.US, if (it < 1) "%.3f" else "%.1f", it) } ?: "–"
         fun pc(v: Double) = String.format(Locale.US, "%.1f%%", v)
         val table = buildString {
-            appendLine("| 장소 수 n | 완전 탐색 (ms) | Held-Karp (ms) | 2-opt·Or-opt (ms) | 최근접 이웃 | + 2-opt | + Or-opt | 비교 기준 |")
-            appendLine("|---|---|---|---|---|---|---|---|")
-            for (r in rows) appendLine("| ${r.n} | ${ms(r.brute)} | ${ms(r.hk)} | ${ms(r.heur)} | ${pc(r.gapNn)} | ${pc(r.gap2)} | ${pc(r.gapAll)} | ${if (r.vsMst) "MST 하한" else "최적 (Held-Karp)"} |")
+            appendLine("| 장소 수 n | 완전 탐색 (ms) | Held-Karp (ms) | 2-opt·Or-opt (ms) | 최근접 이웃 | + 2-opt | + Or-opt | + 끼워 넣기 시작 (앱) | 비교 기준 |")
+            appendLine("|---|---|---|---|---|---|---|---|---|")
+            for (r in rows) appendLine("| ${r.n} | ${ms(r.brute)} | ${ms(r.hk)} | ${ms(r.heur)} | ${pc(r.gapNn)} | ${pc(r.gap2)} | ${pc(r.gapOr)} | ${pc(r.gapAll)} | ${if (r.vsMst) "MST 하한" else "최적 (Held-Karp)"} |")
         }
         // Both charts mark where the app switches from the exact route to the heuristic.
         val switchAt = NS.indexOf(EXACT_MAX)
@@ -142,11 +143,12 @@ class RouteBench {
         )
         val gapChart = lineChart(
             title = "방법별 동선 길이 (정답 대비, 정답 = Held-Karp)", xLabel = "장소 수 n", xs = NS.filter { it <= HELD_KARP_MAX }.map { "$it" }, yLabel = "%",
-            subtitle = "Held-Karp는 정답이라 늘 0%. 최근접 이웃에 2-opt, Or-opt를 차례로 더해요(앱은 ③까지)",
+            subtitle = "Held-Karp는 정답이라 늘 0%. 최근접 이웃에 2-opt, Or-opt, 끼워 넣기 시작을 차례로 더해요(앱은 ④)",
             series = listOf(
                 Series("① 최근접 이웃", 0, rows.filter { !it.vsMst }.map { it.gapNn }),
                 Series("② + 2-opt", 1, rows.filter { !it.vsMst }.map { it.gap2 }),
-                Series("③ + Or-opt", 2, rows.filter { !it.vsMst }.map { it.gapAll }),
+                Series("③ + Or-opt", 2, rows.filter { !it.vsMst }.map { it.gapOr }),
+                Series("④ + 끼워 넣기 시작 (앱)", 4, rows.filter { !it.vsMst }.map { it.gapAll }),
                 Series("Held-Karp (정답)", 3, rows.filter { !it.vsMst }.map { 0.0 }),
             ),
             split = Split(switchAt, "앱은 정답 사용", "2-opt·Or-opt 사용"),
@@ -165,9 +167,10 @@ class RouteBench {
 }
 
 /**
- * Coupon stops: 5–8 places in one neighborhood plus 1–2 brands whose real branches lie within 500m
+ * Coupon stops: 5–8 places in one neighborhood plus 1–3 brands whose real branches lie within 500m
  * of a place (up to 8 per brand). Naive = take each brand's branch nearest the places' center, then
- * solve the plain route; GTSP = let the exact route pick the branch. Returns the markdown table.
+ * solve the plain route; GTSP = let the exact route pick the branch; the heuristic is compared with
+ * that optimum on the same stops. Returns the markdown table.
  */
 private fun couponExperiment(): String {
     val text = RouteBench::class.java.classLoader!!.getResource("sim/seoul.json")!!.readText()
@@ -175,13 +178,13 @@ private fun couponExperiment(): String {
     val byHood = data.places.groupBy { it.hood }.values.toList()
     val brands = SIM_BRANDS.map { (_, key) -> data.branches.getValue(key).map { Coords(it.lat, it.lng) } }
     val r = Random(20261014)
-    data class Trial(val saving: Double, val naiveMs: Double, val gtspMs: Double, val brands: Int)
+    data class Trial(val saving: Double, val naiveMs: Double, val gtspMs: Double, val heurGap: Double, val brands: Int)
     val trials = mutableListOf<Trial>()
-    while (trials.size < 60) {
+    while (trials.size < 90) {
         val places = byHood[r.nextInt(byHood.size)].shuffled(r).take(5 + r.nextInt(4)).map { Coords(it.lat, it.lng) }
         val center = Coords(places.map { it.latitude }.average(), places.map { it.longitude }.average())
         val nearBrands = brands.map { b -> b.filter { br -> places.any { distanceMeters(it, br) <= 500 } }.sortedBy { distanceMeters(center, it) }.take(8) }
-            .filter { it.size >= 2 }.shuffled(r).take(1 + r.nextInt(2))
+            .filter { it.size >= 2 }.shuffled(r).take(1 + r.nextInt(3))
         if (nearBrands.isEmpty()) continue
         val start = Coords(center.latitude + (r.nextDouble() - 0.5) * 0.004, center.longitude + (r.nextDouble() - 0.5) * 0.005)
         var naive = 0.0
@@ -191,14 +194,15 @@ private fun couponExperiment(): String {
         t = System.nanoTime()
         val gtsp = exactRoute(stopsOf(places) + nearBrands, start).meters
         val gtspMs = (System.nanoTime() - t) / 1e6
-        trials += Trial(100 * (1 - gtsp / naive), naiveMs, gtspMs, nearBrands.size)
+        val heur = heuristicRoute(stopsOf(places) + nearBrands, start).meters
+        trials += Trial(100 * (1 - gtsp / naive), naiveMs, gtspMs, 100 * (heur / gtsp - 1), nearBrands.size)
     }
     fun f(v: Double) = String.format(Locale.US, "%.1f", v)
     return buildString {
-        appendLine("| 쿠폰 브랜드 수 | 경우 | 지점 선택 최적화로 줄어든 거리 (평균) | 최대 | 단순 방법 (ms, 중앙값) | 지점 선택 최적화 (ms, 중앙값) |")
-        appendLine("|---|---|---|---|---|---|")
+        appendLine("| 쿠폰 브랜드 수 | 경우 | 지점 선택 최적화로 줄어든 거리 (평균) | 최대 | 단순 방법 (ms, 중앙값) | 지점 선택 최적화 (ms, 중앙값) | 휴리스틱, 정답 대비 (평균 / 최대) |")
+        appendLine("|---|---|---|---|---|---|---|")
         for ((k, ts) in trials.groupBy { it.brands }.toSortedMap()) {
-            appendLine("| $k | ${ts.size} | ${f(ts.map { it.saving }.average())}% | ${f(ts.maxOf { it.saving })}% | ${f(ts.map { it.naiveMs }.sorted()[ts.size / 2])} | ${f(ts.map { it.gtspMs }.sorted()[ts.size / 2])} |")
+            appendLine("| $k | ${ts.size} | ${f(ts.map { it.saving }.average())}% | ${f(ts.maxOf { it.saving })}% | ${f(ts.map { it.naiveMs }.sorted()[ts.size / 2])} | ${f(ts.map { it.gtspMs }.sorted()[ts.size / 2])} | +${f(ts.map { it.heurGap }.average())}% / +${f(ts.maxOf { it.heurGap })}% |")
         }
     }
 }
@@ -215,7 +219,7 @@ private fun routeDoc(table: String, cutoff: Int, coupons: String) = """## 동네
 |---|---|---|---|
 | 완전 탐색 | O(g!·∏kᵢ) | 최적 | 테스트에서 정답 확인용 |
 | **Held-Karp 동적 계획법** | O(2^g·N²), 메모리 O(2^g·N) (쿠폰 없으면 O(n²·2ⁿ)) | 최적 | 들를 곳 ${EXACT_MAX}곳 이하 |
-| **최근접 이웃 + 2-opt + Or-opt + 지점 다시 고르기** | 한 바퀴 O(g³ + Σkᵢkᵢ₊₁) (구현), 몇 바퀴 반복 | 보장 없음 (휴리스틱) | ${EXACT_MAX + 1}곳 이상 |
+| **최근접 이웃·끼워 넣기 + 2-opt + Or-opt + 지점 다시 고르기** | 한 바퀴 O(g³ + Σkᵢkᵢ₊₁) (구현), 몇 바퀴 반복 | 보장 없음 (휴리스틱) | ${EXACT_MAX + 1}곳 이상 |
 | 최소 신장 트리(MST, Prim) | O(g²·k²) | 하한 | 정답을 구할 수 없을 만큼 클 때 휴리스틱의 오차 상한 계산 |
 
 #### 각 방법을 쉽게 말하면
@@ -225,11 +229,12 @@ private fun routeDoc(table: String, cutoff: Int, coupons: String) = """## 동네
 - **완전 탐색**: 가능한 순서(A→B→C→D, A→B→D→C, …)를 전부 재 보고 가장 짧은 걸 골라요. 답은 확실하지만 순서의 수가 n!이라 한 곳 늘 때마다 대략 n배 느려져요. 그래서 앱에서는 안 쓰고, 다른 방법이 맞는 답을 내는지 확인하는 정답지로만 써요.
 - **Held-Karp 동적 계획법**: "A, B, C를 들렀고 지금 C에 있다"처럼 **상황이 같은 경로는 짧은 것 하나만 기억**해요. S→A→B→C와 S→B→A→C는 앞으로 갈 길이 똑같으니 긴 쪽은 버려요. 그래서 순서 전체(n!) 대신 "들른 곳 집합 × 지금 위치"(2ⁿ·n칸)만 채우면 돼요. 정확한 답을 주지만 2ⁿ으로 늘어서 ${EXACT_MAX}곳까지만 써요.
   - 쿠폰 지점이 있으면 집합은 브랜드 단위로 체크하고, "지금 위치"는 실제 지점으로 둬요. 그래서 순서와 들를 지점을 한 번에 정해요.
-- **2-opt·Or-opt 휴리스틱** (${EXACT_MAX + 1}곳 이상). 정답을 보장하지 않는 대신 빨라요(그래서 "근사 알고리즘"이 아니라 휴리스틱이에요). 아래 그래프의 ①②③이 이 단계들이에요.
+- **2-opt·Or-opt 휴리스틱** (${EXACT_MAX + 1}곳 이상). 정답을 보장하지 않는 대신 빨라요(그래서 "근사 알고리즘"이 아니라 휴리스틱이에요). 아래 그래프의 ①~④가 이 단계들이에요.
   - **① 최근접 이웃 (Nearest Neighbor)**: 지금 위치에서 가장 가까운 안 간 곳으로 계속 가요. 빠르지만 10% 정도 길게 나와요.
   - **② 2-opt**: 동선에 X자로 엇갈린 두 선이 있으면 그 사이 구간을 뒤집어 풀어요. 엇갈린 선을 풀면 항상 짧아져요.
-  - **③ Or-opt**: 1~3곳을 떼어 동선의 다른 자리에 끼워 보고, 짧아지면 옮겨요.
+  - **③ Or-opt**: 1~3곳을 떼어 동선의 다른 자리에 끼워 보고, 짧아지면 옮겨요. 한 곳을 옮길 때는 그 브랜드의 다른 지점으로 바꿔 끼우는 것도 함께 따져요(쿠폰 지점은 자리를 옮기면 더 가까운 다른 지점이 맞는 경우가 많아요).
   - **지점 다시 고르기**: 순서를 정해 둔 채로 브랜드마다 어느 지점이 가장 짧은지 다시 골라요. ②, ③과 이 단계를 더 줄지 않을 때까지 번갈아 해요.
+  - **④ 끼워 넣기 시작**: ①과 별도로, 출발점에서 먼 곳부터 "가장 덜 늘어나는 자리와 지점"에 하나씩 끼워 넣은 동선도 만들어 ②③을 똑같이 돌리고, 둘 중 짧은 쪽을 써요. 앱이 쓰는 방식이에요.
 - **MST 하한**: 모든 장소를 선으로 잇는 가장 짧은 방법(최소 신장 트리)이에요. 한 줄로 잇는 동선도 "모두 이은 모양"의 하나라서 어떤 동선도 이보다 짧을 수 없어요. 정답을 구할 수 없는 큰 n에서 "휴리스틱이 최대 몇 % 길다"를 재는 바닥으로 써요. 이번 측정은 20곳까지 Held-Karp로 정답을 구할 수 있어서 쓰지 않았어요.
 
 ### 실험
@@ -246,7 +251,7 @@ $table
 
 "쿠폰 쓸 곳 포함"을 켜면 쿠폰 브랜드마다 근처 지점 중 **한 곳만** 들르면 돼요. 이건 무리마다 한 곳을 고르는 **일반화 외판원 문제(Generalized TSP)**예요. Held-Karp의 상태를 (들른 무리 집합, 마지막으로 들른 지점)으로 넓혀 O(2^g·N²)에 정확히 풀어요(g = 무리 수, N = 전체 후보 수).
 
-비교: 브랜드마다 장소들 중심에서 가장 가까운 지점을 미리 고르는 **단순 방법** 대 **지점 선택 최적화**. 동네에서 장소 5~8곳과 실제 지점(장소에서 500m 안, 브랜드마다 최대 8곳)을 60번 뽑았어요.
+비교: 브랜드마다 장소들 중심에서 가장 가까운 지점을 미리 고르는 **단순 방법** 대 **지점 선택 최적화**. 동네에서 장소 5~8곳과 실제 지점(스타벅스·메가커피·올리브영 중 1~3개 브랜드, 장소에서 500m 안, 브랜드마다 최대 8곳)을 90번 뽑았어요. 마지막 열은 같은 문제를 휴리스틱(12곳 이상에서 쓰는 방법)으로 풀었을 때 정답보다 얼마나 긴지예요.
 
 $coupons
 ### 결론

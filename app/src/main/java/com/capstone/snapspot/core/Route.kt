@@ -7,7 +7,8 @@
  *
  * - [bruteForceRoute]: every stop order × every pick. Ground truth for tests and the benchmark only.
  * - [exactRoute]: Held-Karp DP over (visited stops bitmask, last option). O(2^g·N²) time, O(2^g·N) memory.
- * - [heuristicRoute]: nearest neighbor, then alternate (a) 2-opt / Or-opt on the stop order and
+ * - [heuristicRoute]: nearest neighbor (and, from a start, cheapest insertion as a second seed), then alternate
+ *   (a) 2-opt / Or-opt on the stop order, a single moved stop also trying every option of its stop, and
  *   (b) re-picking every stop's option for that order by a layered shortest path, until neither helps.
  * - [lowerBound]: MST over stops where two stops are as far apart as their closest options; no path
  *   through one option per stop can be shorter, so it bounds the heuristic's gap without the optimum.
@@ -119,15 +120,20 @@ fun exactRoute(stops: List<Stop>, start: Coords?): RouteResult {
     return gr.result(nodes.toList())
 }
 
-fun heuristicRoute(stops: List<Stop>, start: Coords?, twoOpt: Boolean = true, orOpt: Boolean = true, repick: Boolean = true): RouteResult {
+fun heuristicRoute(
+    stops: List<Stop>, start: Coords?, twoOpt: Boolean = true, orOpt: Boolean = true, repick: Boolean = true, insertion: Boolean = true,
+): RouteResult {
     if (stops.isEmpty()) return RouteResult(emptyList(), emptyList(), 0.0)
     val gr = Graph(stops, start)
-    // With a start, one run from it; without, every option as the first one and keep the best.
-    val firsts = if (start != null) listOf(-1) else (0 until gr.n).toList()
+    // With a start, two runs from it (nearest neighbor and cheapest insertion). Without, a nearest-neighbor run
+    // from every stop, each starting at that stop's first option (the improvement moves re-pick options anyway).
+    val seeds: List<() -> MutableList<Int>> =
+        if (start != null) listOfNotNull({ nearestNeighbor(gr, -1) }, if (insertion) { { cheapestInsertion(gr) } } else null)
+        else (0 until gr.g).map { s -> { nearestNeighbor(gr, gr.offset[s]) } }
     var best: List<Int> = emptyList()
     var bestLen = Double.MAX_VALUE
-    for (first in firsts) {
-        val nodes = nearestNeighbor(gr, first)
+    for (seed in seeds) {
+        val nodes = seed()
         improve(gr, nodes, twoOpt, orOpt, repick)
         val len = gr.length(nodes)
         if (len < bestLen) {
@@ -155,6 +161,32 @@ private fun nearestNeighbor(gr: Graph, first: Int): MutableList<Int> {
     return nodes
 }
 
+/**
+ * From the start point: stops farthest from it first, each inserted with whichever of its options and at
+ * whichever position lengthens the route least.
+ */
+private fun cheapestInsertion(gr: Graph): MutableList<Int> {
+    val nodes = mutableListOf<Int>()
+    val order = (0 until gr.g).sortedByDescending { s -> gr.nodesOf(s).minOf { gr.lead(it) } }
+    for (s in order) {
+        var bestNode = -1
+        var bestPos = 0
+        var bestLen = Double.MAX_VALUE
+        for (u in gr.nodesOf(s)) for (pos in 0..nodes.size) {
+            nodes.add(pos, u)
+            val l = gr.length(nodes)
+            if (l < bestLen) {
+                bestLen = l
+                bestNode = u
+                bestPos = pos
+            }
+            nodes.removeAt(pos)
+        }
+        nodes.add(bestPos, bestNode)
+    }
+    return nodes
+}
+
 /** Alternates order moves (2-opt, Or-opt) and option re-picking until nothing shortens the route. */
 private fun improve(gr: Graph, nodes: MutableList<Int>, twoOpt: Boolean, orOpt: Boolean, repick: Boolean) {
     // Without a start point each run fixes its own first stop; with one, every position may move.
@@ -176,19 +208,24 @@ private fun improve(gr: Graph, nodes: MutableList<Int>, twoOpt: Boolean, orOpt: 
                     val before = gr.length(nodes)
                     val seg = nodes.subList(i, i + len).toList()
                     repeat(len) { nodes.removeAt(i) }
+                    // A single stop moves together with a new pick among its options: a coupon branch that
+                    // fits better elsewhere is often a different branch of the same brand.
+                    val variants = if (len == 1) gr.nodesOf(gr.stopOf[seg[0]]).map { listOf(it) } else listOf(seg)
                     var bestPos = -1
+                    var bestSeg = seg
                     var bestLen = before - 1e-9
-                    for (pos in lo..nodes.size) {
-                        nodes.addAll(pos, seg)
+                    for (v in variants) for (pos in lo..nodes.size) {
+                        nodes.addAll(pos, v)
                         val l = gr.length(nodes)
                         if (l < bestLen) {
                             bestLen = l
                             bestPos = pos
+                            bestSeg = v
                         }
                         repeat(len) { nodes.removeAt(pos) }
                     }
                     if (bestPos >= 0) {
-                        nodes.addAll(bestPos, seg)
+                        nodes.addAll(bestPos, bestSeg)
                         improved = true
                     } else {
                         nodes.addAll(i, seg)

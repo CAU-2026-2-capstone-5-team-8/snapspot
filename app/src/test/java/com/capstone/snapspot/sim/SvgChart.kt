@@ -40,7 +40,8 @@ class RefLine(val value: Double, val label: String, val atStart: Boolean = false
 class Split(val after: Int, val left: String, val right: String)
 
 enum class Palette(val light: List<String>, val dark: List<String>) {
-    ORDINAL(listOf("#86b6ef", "#2a78d6", "#104281", "#eb6834"), listOf("#184f95", "#3987e5", "#9ec5f4", "#d95926")),
+    // Slot 4 continues the blue ramp past slot 2 (the darkest step), after the orange slot 3.
+    ORDINAL(listOf("#86b6ef", "#2a78d6", "#104281", "#eb6834", "#0a2550"), listOf("#184f95", "#3987e5", "#9ec5f4", "#d95926", "#d6e7fb")),
     CATEGORICAL(listOf("#2a78d6", "#eb6834", "#1baf7a"), listOf("#3987e5", "#d95926", "#199e70")),
 }
 

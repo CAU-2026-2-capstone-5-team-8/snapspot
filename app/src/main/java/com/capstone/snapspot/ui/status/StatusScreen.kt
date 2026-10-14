@@ -28,6 +28,7 @@ import com.capstone.snapspot.core.MAX_REGIONS
 import com.capstone.snapspot.core.PLACE_GROUP
 import com.capstone.snapspot.core.REFRESH_RADIUS_M
 import com.capstone.snapspot.core.brandKey
+import com.capstone.snapspot.core.brandKeyOfRegion
 import com.capstone.snapspot.core.placeEnded
 import com.capstone.snapspot.ui.components.BigTitle
 import com.capstone.snapspot.ui.components.Card
@@ -39,6 +40,8 @@ import com.capstone.snapspot.ui.map.MapBranch
 import com.capstone.snapspot.ui.map.MapFocus
 import com.capstone.snapspot.ui.map.MapPlace
 import com.capstone.snapspot.ui.map.SpotMap
+import com.capstone.snapspot.ui.map.brandTone
+import com.capstone.snapspot.ui.map.brandToneIndex
 import com.capstone.snapspot.ui.theme.SnapColors
 import com.capstone.snapspot.ui.theme.SnapSpace
 import com.capstone.snapspot.ui.theme.SnapType
@@ -63,13 +66,15 @@ fun StatusScreen(vm: HomeViewModel, onBack: () -> Unit, onAskPermissions: () -> 
     val here by vm.here.collectAsState()
     val brandNames = coupons.associate { brandKey(it.coupon.brand) to it.coupon.brand }
     val now = System.currentTimeMillis()
+    // Same brand colors as the home map.
+    val tones = brandToneIndex(coupons.map { it.coupon }.sortedBy { it.createdAt }.map { brandKey(it.brand) })
 
-    // Places in ink, coupon branches in lime-deep (urgent brands in orange), the refresh region in grey.
+    // Places in ink, each brand's branches in its map color (urgent brands in orange), the refresh region in grey.
     val parts = buildList {
         add(Triple("저장한 장소", win?.byGroup?.get(PLACE_GROUP) ?: 0, SnapColors.ink))
         win?.byGroup.orEmpty().filterKeys { it != PLACE_GROUP }.forEach { (g, n) ->
             val urgent = win?.branches?.values?.any { it.brandKey == g && it.urgent } == true
-            add(Triple("${brandNames[g] ?: g} 지점${if (urgent) " · 임박" else ""}", n, if (urgent) SnapColors.urgent else SnapColors.limeDeep))
+            add(Triple("${brandNames[g] ?: g} 지점${if (urgent) " · 임박" else ""}", n, if (urgent) SnapColors.urgent else brandTone(tones[g] ?: 0)))
         }
         if (win?.here != null) add(Triple("갱신 구역 (반경 ${(REFRESH_RADIUS_M / 1000).toInt()}km)", 1, SnapColors.muted.copy(alpha = 0.45f)))
     }
@@ -108,8 +113,8 @@ fun StatusScreen(vm: HomeViewModel, onBack: () -> Unit, onAskPermissions: () -> 
 
             win?.here?.let { center ->
                 SpotMap(
-                    places = places.map { MapPlace(it.id, Coords(it.latitude, it.longitude), it.radius.toDouble(), it.name.take(1), placeEnded(it, now), false) },
-                    branches = win?.branches.orEmpty().map { (id, b) -> MapBranch(id, Coords(b.latitude, b.longitude), b.urgent, false) },
+                    places = places.map { MapPlace(it.id, Coords(it.latitude, it.longitude), it.radius.toDouble(), it.imageUri, placeEnded(it, now), false) },
+                    branches = win?.branches.orEmpty().map { (id, b) -> MapBranch(id, Coords(b.latitude, b.longitude), b.urgent, false, tones[brandKeyOfRegion(id)] ?: 0) },
                     here = here,
                     focus = MapFocus(center, 0, 14),
                     refresh = center to REFRESH_RADIUS_M,

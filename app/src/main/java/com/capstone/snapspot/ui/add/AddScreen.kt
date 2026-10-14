@@ -65,6 +65,7 @@ import com.capstone.snapspot.ui.components.BigTitle
 import com.capstone.snapspot.ui.components.Field
 import com.capstone.snapspot.ui.components.IconTap
 import com.capstone.snapspot.ui.components.Notice
+import com.capstone.snapspot.ui.components.PhotoShot
 import com.capstone.snapspot.ui.components.PrimaryButton
 import com.capstone.snapspot.ui.components.SecondaryButton
 import com.capstone.snapspot.ui.components.Segmented
@@ -136,7 +137,7 @@ fun AddScreen(
                     (if (isCoupon) d.brand else d.name).ifBlank { "이름을 적어 주세요" },
                     Modifier.padding(start = 4.dp, top = 4.dp, bottom = 8.dp),
                 )
-                WideShot(d.imageUri, if (isCoupon) null else matchLabel(d.matched, d.coords != null))
+                WideShot(d.imageUri, if (isCoupon) null else matchLabel(d.matched, d.coords != null), whole = isCoupon)
                 Segmented(listOf("place", "coupon"), d.kind, vm::setKind, { if (it == "place") "가 볼 장소" else "기프티콘" })
                 if (isCoupon) CouponForm(vm, d) else PlaceForm(vm, d)
                 Spacer(Modifier.height(8.dp))
@@ -203,9 +204,11 @@ fun AddScreen(
 
 /** The screenshot across the screen, with how its place was found on a white chip. */
 @Composable
-private fun WideShot(uri: String?, label: String?) {
-    BoxWithConstraints(Modifier.fillMaxWidth().height(180.dp).clip(SnapShapes.card)) {
-        Shot(uri, maxWidth, maxHeight, shape = RectangleShape)
+private fun WideShot(uri: String?, label: String?, whole: Boolean) {
+    // The screenshot's picture in full (a post's photo, a poster), not a fixed-height slice of its middle.
+    Box(Modifier.fillMaxWidth().clip(SnapShapes.card)) {
+        // A gifticon is shown whole (product, name, expiry, barcode), scaled down to fit.
+        PhotoShot(uri, minHeight = 160.dp, maxHeight = 340.dp, whole = whole)
         label?.let {
             Text(
                 it,
@@ -260,7 +263,7 @@ private fun PlaceForm(vm: AddViewModel, d: Draft) {
         d.coords?.let { at ->
             // The chosen radius, drawn right away on a small map.
             SpotMap(
-                places = listOf(MapPlace("draft", at, d.radius.toDouble(), d.name.firstOrNull()?.toString() ?: "?", ended = false, selected = true)),
+                places = listOf(MapPlace("draft", at, d.radius.toDouble(), d.imageUri.ifEmpty { null }, ended = false, selected = true)),
                 branches = emptyList(),
                 here = here,
                 focus = MapFocus(at, d.radius.toLong(), zoomFor(d.radius)),
