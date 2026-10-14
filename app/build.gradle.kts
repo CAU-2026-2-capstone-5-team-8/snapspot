@@ -28,6 +28,7 @@ android {
         buildConfigField("String", "GEMINI_MODEL", key("GEMINI_MODEL", "gemini-3.5-flash-lite"))
         buildConfigField("String", "KAKAO_REST_KEY", key("KAKAO_REST_KEY"))
         buildConfigField("String", "KAKAO_NATIVE_KEY", key("KAKAO_NATIVE_KEY"))
+        buildConfigField("String", "TMAP_APP_KEY", key("TMAP_APP_KEY"))
         // Kakao Map ships ARM libraries only; x86_64 emulators run them through ARM translation.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
