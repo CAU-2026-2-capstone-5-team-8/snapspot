@@ -40,6 +40,7 @@ import com.capstone.snapspot.ui.home.HomeScreen
 import com.capstone.snapspot.ui.home.HomeViewModel
 import com.capstone.snapspot.ui.status.StatusScreen
 import com.capstone.snapspot.ui.theme.SnapColors
+import com.capstone.snapspot.ui.theme.SnapShapes
 import com.capstone.snapspot.ui.theme.SnapType
 
 /**
@@ -192,10 +193,11 @@ fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit, shared: List<Uri>
                 TextButton(onClick = {
                     explainBackground = false
                     if (Build.VERSION.SDK_INT >= 29) background.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                }) { Text("설정하기", color = SnapColors.green, fontWeight = FontWeight.Bold) }
+                }) { Text("설정하기", color = SnapColors.ink, fontWeight = FontWeight.Bold) }
             },
             dismissButton = { TextButton(onClick = { explainBackground = false }) { Text("나중에", color = SnapColors.muted) } },
             containerColor = SnapColors.surface,
+            shape = SnapShapes.card,
         )
     }
     if (missingKey) {
@@ -203,8 +205,9 @@ fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit, shared: List<Uri>
             onDismissRequest = { missingKey = false },
             title = { Text("설정이 필요해요", style = SnapType.title) },
             text = { Text("local.properties 파일에 GEMINI_API_KEY를 넣고 다시 빌드해 주세요.", style = SnapType.body) },
-            confirmButton = { TextButton(onClick = { missingKey = false }) { Text("확인", color = SnapColors.green) } },
+            confirmButton = { TextButton(onClick = { missingKey = false }) { Text("확인", color = SnapColors.ink) } },
             containerColor = SnapColors.surface,
+            shape = SnapShapes.card,
         )
     }
 }

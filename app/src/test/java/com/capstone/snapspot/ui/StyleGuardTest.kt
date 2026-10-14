@@ -9,11 +9,8 @@ import java.io.File
 class StyleGuardTest {
     private val root = File("src/main/java/com/capstone/snapspot")
 
-    /** Files not moved to the refreshed design yet. Each task of the refresh removes its own; empty when done. */
-    private val legacy = setOf(
-        "ui/Nav.kt",
-        "notify/AndroidNotifier.kt",
-    )
+    /** Files not moved to the refreshed design yet. Empty: the refresh is done; keep it that way. */
+    private val legacy = emptySet<String>()
 
     private val banned = listOf(
         Regex("""Color\(0x""") to "raw color (use SnapColors)",

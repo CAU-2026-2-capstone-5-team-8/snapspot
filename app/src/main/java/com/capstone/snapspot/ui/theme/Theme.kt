@@ -35,13 +35,6 @@ object SnapColors {
     /** Coupons that end within 3 days. */
     val urgent = Color(0xFFC2410C)
 
-    // Pre-refresh colors, for screens not moved over yet (StyleGuardTest.legacy). Removed in the last task.
-    val paper = Color(0xFFF2F3EE)
-    val green = Color(0xFF2D7A57)
-    val greenSoft = Color(0xFFE3EFE7)
-    val highlight = Color(0xFFFFE34D)
-    val amber = Color(0xFF8A5A0A)
-    val amberSoft = Color(0xFFFBF0D4)
 }
 
 object SnapFonts {
@@ -52,9 +45,6 @@ object SnapFonts {
         Font(R.font.pretendard_extrabold, FontWeight.ExtraBold),
     )
 
-    // Pre-refresh names. Removed in the last task.
-    val display = FontFamily(Font(R.font.black_han_sans))
-    val body = sans
 }
 
 private val tight = (-0.3).sp
@@ -70,9 +60,6 @@ object SnapType {
     /** Button text: no color, the button decides. */
     val button = TextStyle(fontFamily = SnapFonts.sans, fontWeight = FontWeight.Bold, fontSize = 15.sp, lineHeight = 20.sp, letterSpacing = tight)
 
-    // Pre-refresh styles. Removed in the last task.
-    val hero = TextStyle(fontFamily = SnapFonts.display, fontSize = 40.sp, lineHeight = 46.sp, color = SnapColors.ink)
-    val distance = TextStyle(fontFamily = SnapFonts.display, fontSize = 18.sp, lineHeight = 22.sp, color = SnapColors.ink)
 }
 
 object SnapShapes {
