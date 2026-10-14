@@ -54,6 +54,31 @@
             </intent-filter>
         </receiver>
 
+        <!-- Home-screen widgets (Glance). -->
+        <receiver
+            android:name=".ui.widget.ExpiringWidgetReceiver"
+            android:exported="true"
+            android:label="곧 만료">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/expiring_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".ui.widget.NearbyWidgetReceiver"
+            android:exported="true"
+            android:label="근처 지점">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/nearby_widget_info" />
+        </receiver>
+
         <!-- Expedited geofence work runs as a foreground service on Android 11 and below. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
