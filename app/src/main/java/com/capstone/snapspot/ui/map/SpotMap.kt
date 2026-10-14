@@ -89,8 +89,13 @@ data class MapPlace(
 /** A registered coupon branch: a small square with a gift icon in its brand's color ([brandTone]), no radius. */
 data class MapBranch(val id: String, val at: Coords, val urgent: Boolean, val near: Boolean, val tone: Int = 0)
 
-/** Where the camera should go; `seq` changes for every request so the same spot can be re-focused. */
-data class MapFocus(val at: Coords, val seq: Long, val zoom: Int = 16)
+/**
+ * Where the camera should go; `seq` changes for every request so the same spot can be re-focused.
+ * Without a `zoom`, the map keeps its own, zooming in only as far as [FOLLOW_ZOOM] (following the user).
+ */
+data class MapFocus(val at: Coords, val seq: Long, val zoom: Int? = 16)
+
+private const val FOLLOW_ZOOM = 15
 
 private val SEOUL = Coords(37.5665, 126.9780)
 
@@ -118,6 +123,8 @@ fun SpotMap(
     route: List<Coords> = emptyList(),
     padBottom: Dp = 0.dp,
     onPinClick: (String) -> Unit = {},
+    /** The camera came to rest: its center, its zoom, and whether a hand moved it (not the app). */
+    onCameraRest: (Coords, Int, Boolean) -> Unit = { _, _, _ -> },
 ) {
     val ctx = LocalContext.current
     if (!(ctx.applicationContext as SnapSpotApp).mapReady) {
@@ -128,6 +135,7 @@ fun SpotMap(
     var map by remember { mutableStateOf<KakaoMap?>(null) }
     var failed by remember { mutableStateOf<String?>(null) }
     val onPin by rememberUpdatedState(onPinClick)
+    val onRest by rememberUpdatedState(onCameraRest)
     val startAt = remember { focus?.at ?: here ?: places.firstOrNull()?.at ?: SEOUL }
     val density = LocalDensity.current.density
     val face = remember { ResourcesCompat.getFont(ctx, R.font.pretendard_bold) ?: Typeface.DEFAULT_BOLD }
@@ -149,6 +157,10 @@ fun SpotMap(
                         kakaoMap.setOnLabelClickListener { _, _, label ->
                             (label.tag as? String)?.let { onPin(it) }
                             true
+                        }
+                        // A move the app makes (following, focusing, fitting a route) reports no gesture; a hand does.
+                        kakaoMap.setOnCameraMoveEndListener { _, position, gesture ->
+                            onRest(Coords(position.position.latitude, position.position.longitude), position.zoomLevel, gesture != GestureType.Unknown)
                         }
                         map = kakaoMap
                     }
@@ -206,7 +218,7 @@ fun SpotMap(
     LaunchedEffect(map, focus) {
         val m = map ?: return@LaunchedEffect
         val f = focus ?: return@LaunchedEffect
-        m.moveCamera(CameraUpdateFactory.newCenterPosition(LatLng.from(f.at.latitude, f.at.longitude), f.zoom), CameraAnimation.from(350))
+        m.moveCamera(CameraUpdateFactory.newCenterPosition(LatLng.from(f.at.latitude, f.at.longitude), f.zoom ?: maxOf(m.zoomLevel, FOLLOW_ZOOM)), CameraAnimation.from(350))
     }
 
     // A new route (a bundle opened, coupons toggled, the walking path arriving) brings all of it into view.

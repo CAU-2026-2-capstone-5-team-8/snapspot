@@ -33,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -67,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.capstone.snapspot.core.BRANCH_RADIUS_M
 import com.capstone.snapspot.core.Coords
+import com.capstone.snapspot.core.MAP_MIN_SEARCH_ZOOM
 import com.capstone.snapspot.core.URGENT_DAYS
 import com.capstone.snapspot.core.brandKey
 import com.capstone.snapspot.core.brandKeyOfRegion
@@ -75,8 +77,10 @@ import com.capstone.snapspot.core.dDay
 import com.capstone.snapspot.core.daysLeft
 import com.capstone.snapspot.core.distanceMeters
 import com.capstone.snapspot.core.formatDistance
+import com.capstone.snapspot.core.limitBranches
 import com.capstone.snapspot.core.model.Coupon
 import com.capstone.snapspot.core.model.Place
+import com.capstone.snapspot.core.needsMapSearch
 import com.capstone.snapspot.core.placeDaysLeft
 import com.capstone.snapspot.core.placeEnded
 import com.capstone.snapspot.core.untilLabel
@@ -147,6 +151,10 @@ fun HomeScreen(
     val openBundle by vm.openBundle.collectAsState()
     val couponsOn by vm.withCoupons.collectAsState()
     val walks by vm.walks.collectAsState()
+    val found by vm.mapBranches.collectAsState()
+    val following by vm.following.collectAsState()
+    val camera by vm.camera.collectAsState()
+    val searchAt by vm.mapSearchAt.collectAsState()
     val open = bundleItems.firstOrNull { it.bundle.id == openBundle }
     var tab by rememberSaveable { mutableStateOf(Tab.PLACES) }
     var deletingPlace by remember { mutableStateOf<Place?>(null) }
@@ -181,7 +189,8 @@ fun HomeScreen(
     val numberOf = stops.mapIndexedNotNull { i, st -> st.placeId?.let { it to i + 1 } }.toMap()
     // Follows the streets once TMAP answers, straight lines until then.
     val walked = open?.let { walks[it.walkKey]?.line }
-    val mapPlaces = places.map {
+    // A place whose end date has passed stays in the list but leaves the map.
+    val mapPlaces = places.filter { !placeEnded(it, now) }.map {
         MapPlace(
             // Alert circles stay up while the route is still straight lines; once it follows the streets,
             // only the line and numbered stops show, since the circles would clutter it.
@@ -193,9 +202,15 @@ fun HomeScreen(
         else MapPlace("route-$i", st.at, 0.0, null, ended = false, selected = false, number = i + 1, couponStop = true, tone = tones[brandKey(st.brand.orEmpty())] ?: 0)
     }
     val routeLine = if (open == null) emptyList() else walked ?: open.line
-    val mapBranches = win?.branches.orEmpty().map { (id, b) ->
-        val at = Coords(b.latitude, b.longitude)
-        MapBranch(id, at, b.urgent, here?.let { distanceMeters(it, at) <= BRANCH_RADIUS_M } == true, tones[brandKeyOfRegion(id)] ?: 0)
+    // Gifticon branches: the alert plan's around the user plus what the map looked up where it was looking,
+    // drawn only near the user (while following) or the map's center, the nearest few of each brand.
+    val urgentBrands = coupons.filter { it.urgent }.map { brandKey(it.coupon.brand) }.toSet()
+    val branchPins: Map<String, Pair<Coords, Boolean>> =
+        found.mapValues { (id, b) -> Coords(b.latitude, b.longitude) to (brandKeyOfRegion(id) in urgentBrands) } +
+            win?.branches.orEmpty().mapValues { (_, b) -> Coords(b.latitude, b.longitude) to b.urgent }
+    val shown = limitBranches(branchPins.mapValues { it.value.first }, if (following) here else camera?.first ?: here)
+    val mapBranches = branchPins.filterKeys { it in shown }.map { (id, v) ->
+        MapBranch(id, v.first, v.second, here?.let { distanceMeters(it, v.first) <= BRANCH_RADIUS_M } == true, tones[brandKeyOfRegion(id)] ?: 0)
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(SnapColors.bg)) {
@@ -329,6 +344,7 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxSize(),
                     route = routeLine,
                     padBottom = peek,
+                    onCameraRest = vm::onCameraRest,
                     onPinClick = { id ->
                         // A gifticon pin (a branch, or a coupon stop on the route) opens its brand's soonest-expiring gifticon.
                         val brand = when {
@@ -366,6 +382,20 @@ fun HomeScreen(
                         .shadow(4.dp, SnapShapes.card).clip(SnapShapes.card).background(SnapColors.surface).clickable { vm.focusHere() },
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Filled.MyLocation, contentDescription = "내 위치로", tint = SnapColors.ink, modifier = Modifier.size(20.dp)) }
+                // After moving the map by hand far from the last search: look up gifticon branches there.
+                val rest = camera
+                if (open == null && !following && rest != null && coupons.any { it.active }) {
+                    val chip = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 64.dp)
+                    if (rest.second < MAP_MIN_SEARCH_ZOOM) {
+                        FloatingChip(chip) { Text("지도를 확대하면 지점을 찾을 수 있어요", style = SnapType.label) }
+                    } else if (needsMapSearch(searchAt, rest.first)) {
+                        FloatingChip(chip, onClick = { vm.searchMap(rest.first) }) {
+                            Icon(Icons.Filled.Refresh, contentDescription = null, tint = SnapColors.ink, modifier = Modifier.size(16.dp))
+                            Gap(6.dp)
+                            Text("이 지역에서 다시 탐색", style = SnapType.label.copy(color = SnapColors.ink))
+                        }
+                    }
+                }
             }
         }
         if (open == null) {
