@@ -94,6 +94,9 @@ data class MapFocus(val at: Coords, val seq: Long, val zoom: Int = 16)
 
 private val SEOUL = Coords(37.5665, 126.9780)
 
+/** Margin around a route fitted into view: room for the pins and the floating chips over the map's top. */
+private const val ROUTE_FIT_DP = 64
+
 /**
  * Kakao map with saved places (pin + alert radius), registered branches and the user. Full-bleed by default;
  * with `cornerRadius` > 0 it sits in a rounded card, and since the map renders on a SurfaceView that ignores
@@ -204,6 +207,13 @@ fun SpotMap(
         val m = map ?: return@LaunchedEffect
         val f = focus ?: return@LaunchedEffect
         m.moveCamera(CameraUpdateFactory.newCenterPosition(LatLng.from(f.at.latitude, f.at.longitude), f.zoom), CameraAnimation.from(350))
+    }
+
+    // A new route (a bundle opened, coupons toggled, the walking path arriving) brings all of it into view.
+    LaunchedEffect(map, route) {
+        val m = map ?: return@LaunchedEffect
+        if (route.size < 2) return@LaunchedEffect
+        m.moveCamera(CameraUpdateFactory.fitMapPoints(route.map(::latLng).toTypedArray(), (ROUTE_FIT_DP * density).toInt()), CameraAnimation.from(350))
     }
 
     Box(
