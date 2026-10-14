@@ -102,6 +102,7 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.coroutines.play)
     implementation(libs.kakao.map)
+    implementation(libs.glance.appwidget)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
