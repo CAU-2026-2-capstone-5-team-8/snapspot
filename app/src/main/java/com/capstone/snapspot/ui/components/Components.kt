@@ -224,7 +224,7 @@ fun NearChip(text: String = "지금 근처", modifier: Modifier = Modifier) {
     )
 }
 
-/** A white chip floating on the map (logo, "12곳 지켜보는 중", back to the list). */
+/** A white chip floating on the map (logo, "알림 12곳", back to the list). */
 @Composable
 fun FloatingChip(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, content: @Composable RowScope.() -> Unit) {
     Row(

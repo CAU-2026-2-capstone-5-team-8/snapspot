@@ -29,11 +29,11 @@ class HomeCopyTest {
     }
 
     @Test
-    fun `nothing nearby says what is being watched`() {
+    fun `nothing nearby just counts the saved places`() {
         val h = homeHeadline(null, near = 0, saved = 5, alertsOn = true)
         assertNull(h.kicker)
         assertNull(h.count)
-        assertEquals("저장한 곳 5곳을 지켜보고 있어요", h.text)
+        assertEquals("저장한 곳 5곳", h.text)
     }
 
     @Test

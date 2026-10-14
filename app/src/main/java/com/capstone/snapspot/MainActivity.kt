@@ -24,8 +24,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.light(SnapColors.paper.toArgb(), SnapColors.paper.toArgb()),
-            navigationBarStyle = SystemBarStyle.light(SnapColors.paper.toArgb(), SnapColors.paper.toArgb()),
+            statusBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.light(SnapColors.bg.toArgb(), SnapColors.bg.toArgb()),
         )
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) receive(intent)

@@ -31,7 +31,7 @@ fun homeHeadline(region: String?, near: Int, saved: Int, alertsOn: Boolean): Hea
     return when {
         saved == 0 -> Headline(kicker, "가 보고 싶은 곳을 저장해 보세요")
         near > 0 -> Headline(kicker, "근처에 가 볼 곳이", "${near}곳", "있어요")
-        alertsOn -> Headline(kicker, "저장한 곳 ${saved}곳을 지켜보고 있어요")
+        alertsOn -> Headline(kicker, "저장한 곳 ${saved}곳")
         else -> Headline(kicker, "저장한 곳 ${saved}곳, 알림은 꺼져 있어요")
     }
 }
