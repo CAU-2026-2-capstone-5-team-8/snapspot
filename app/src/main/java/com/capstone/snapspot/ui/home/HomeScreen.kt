@@ -96,6 +96,7 @@ fun HomeScreen(
     val bundleItems by vm.bundles.collectAsState()
     val openBundle by vm.openBundle.collectAsState()
     val couponsOn by vm.withCoupons.collectAsState()
+    val walks by vm.walks.collectAsState()
     val open = bundleItems.firstOrNull { it.bundle.id == openBundle }
     var tab by rememberSaveable { mutableStateOf(Tab.PLACES) }
     var deletingPlace by remember { mutableStateOf<Place?>(null) }
@@ -118,7 +119,8 @@ fun HomeScreen(
     } + stops.mapIndexedNotNull { i, st ->
         if (st.placeId != null) null else MapPlace("route-$i", st.at, 0.0, initial(st.name), ended = false, selected = false, number = i + 1)
     }
-    val routeLine = if (open == null) emptyList() else listOfNotNull(open.start) + stops.map { it.at }
+    // Along the streets once TMAP has answered; straight between stops until then (or if it fails).
+    val routeLine = if (open == null) emptyList() else walks[open.walkKey]?.line ?: open.line
     val mapBranches = win?.branches.orEmpty().map { (id, b) ->
         val at = Coords(b.latitude, b.longitude)
         MapBranch(id, at, initial(b.name), b.urgent, here?.let { distanceMeters(it, at) <= 200 } == true)
@@ -183,7 +185,7 @@ fun HomeScreen(
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 items(bundleItems, key = { it.bundle.id }) { b ->
                                     BundleCard(
-                                        b, open = b.bundle.id == openBundle, withCoupons = b.bundle.id in couponsOn,
+                                        b, walks[b.walkKey]?.minutes ?: b.minutes, open = b.bundle.id == openBundle, withCoupons = b.bundle.id in couponsOn,
                                         onClick = { vm.toggleBundle(b.bundle.id) }, onCoupons = { vm.toggleCoupons(b.bundle.id) }, onPreview = { vm.previewBundle(b.bundle.id) },
                                     )
                                 }
@@ -346,7 +348,7 @@ private fun routeStops(b: BundleItem): List<RouteStop> = b.route.order.indices.m
 }
 
 @Composable
-private fun BundleCard(b: BundleItem, open: Boolean, withCoupons: Boolean, onClick: () -> Unit, onCoupons: () -> Unit, onPreview: () -> Unit) {
+private fun BundleCard(b: BundleItem, minutes: Int, open: Boolean, withCoupons: Boolean, onClick: () -> Unit, onCoupons: () -> Unit, onPreview: () -> Unit) {
     val fg = if (open) SnapColors.surface else SnapColors.ink
     Column(
         Modifier.width(220.dp).clip(RoundedCornerShape(16.dp))
@@ -356,7 +358,7 @@ private fun BundleCard(b: BundleItem, open: Boolean, withCoupons: Boolean, onCli
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(b.name, style = SnapType.title.copy(color = fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text("가 볼 곳 ${b.bundle.places.size}곳 · 걸어서 약 ${b.minutes}분", style = SnapType.meta.copy(color = if (open) SnapColors.surface else SnapColors.muted))
+        Text("가 볼 곳 ${b.bundle.places.size}곳 · 걸어서 약 ${minutes}분", style = SnapType.meta.copy(color = if (open) SnapColors.surface else SnapColors.muted))
         if (open) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("쿠폰 쓸 곳 포함", style = SnapType.meta.copy(color = fg), modifier = Modifier.weight(1f))

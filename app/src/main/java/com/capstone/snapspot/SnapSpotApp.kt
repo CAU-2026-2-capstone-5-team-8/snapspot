@@ -11,6 +11,7 @@ import com.capstone.snapspot.geofence.GeofenceSync
 import com.capstone.snapspot.location.LocationTracker
 import com.capstone.snapspot.net.GeminiClient
 import com.capstone.snapspot.net.KakaoHttp
+import com.capstone.snapspot.net.TmapWalk
 import com.capstone.snapspot.notify.AlertService
 import com.capstone.snapspot.notify.AndroidNotifier
 import com.capstone.snapspot.notify.ensureChannel
@@ -25,6 +26,7 @@ class AppContainer(ctx: Context) {
     private val dir = File(ctx.filesDir, "store")
     val repo = Repository(dir)
     val kakao = KakaoHttp(BuildConfig.KAKAO_REST_KEY, http)
+    val walk = TmapWalk(BuildConfig.TMAP_APP_KEY, http)
     val gemini = GeminiClient(BuildConfig.GEMINI_API_KEY, BuildConfig.GEMINI_MODEL.ifEmpty { "gemini-3.5-flash-lite" }, http)
     val branchCache = FileBranchCache(dir)
     val pending = PendingStore(dir)

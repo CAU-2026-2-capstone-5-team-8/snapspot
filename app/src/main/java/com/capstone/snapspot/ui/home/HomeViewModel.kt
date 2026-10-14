@@ -3,6 +3,7 @@ package com.capstone.snapspot.ui.home
 import android.app.Application
 import android.content.Context
 import android.location.LocationManager
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.ExistingWorkPolicy
@@ -30,7 +31,10 @@ import com.capstone.snapspot.core.nearbyBranches
 import com.capstone.snapspot.core.nearbyCouponStops
 import com.capstone.snapspot.core.shortestRoute
 import com.capstone.snapspot.core.stopsOf
+import com.capstone.snapspot.core.WalkPath
+import com.capstone.snapspot.core.walkKey
 import com.capstone.snapspot.core.walkMinutes
+import com.capstone.snapspot.core.walkPath
 import com.capstone.snapspot.geofence.RecheckWorker
 import com.capstone.snapspot.geofence.SyncResult
 import com.capstone.snapspot.geofence.hasBackgroundLocation
@@ -58,8 +62,18 @@ data class Perms(val notif: Boolean = false, val fg: Boolean = false, val bg: Bo
 
 data class CouponItem(val coupon: Coupon, val active: Boolean, val urgent: Boolean, val nearest: Pair<String, Double>?)
 
-/** Route stops: the bundle's places in order, then one stop per coupon brand (any one of its branches). */
-data class BundleItem(val bundle: Bundle, val name: String, val coupons: List<CouponStop>, val route: RouteResult, val start: Coords?, val minutes: Int, val couponsFailed: Boolean)
+/**
+ * Route stops: the bundle's places in order, then one stop per coupon brand (any one of its branches).
+ * [line]: where the route goes in walking order (the start, if any, then the picked option of each stop).
+ */
+data class BundleItem(val bundle: Bundle, val name: String, val coupons: List<CouponStop>, val route: RouteResult, val start: Coords?, val minutes: Int, val couponsFailed: Boolean) {
+    val line: List<Coords> get() = listOfNotNull(start) + route.order.indices.map { i -> stopAt(route.order[i], route.picks[i]) }
+    val walkKey: String get() = walkKey(start, route.order.indices.map { i -> stopAt(route.order[i], route.picks[i]) })
+
+    private fun stopAt(stop: Int, pick: Int): Coords =
+        if (stop < bundle.places.size) bundle.places[stop].let { Coords(it.latitude, it.longitude) }
+        else coupons[stop - bundle.places.size].branches[pick].let { Coords(it.latitude, it.longitude) }
+}
 
 /** App-wide state behind the home screen (map + list), the status screen and the coupon screen. */
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
@@ -118,6 +132,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    /** Street paths of opened bundles by [BundleItem.walkKey]; a bundle without one is drawn straight. */
+    private val _walks = MutableStateFlow<Map<String, WalkPath>>(emptyMap())
+    val walks: StateFlow<Map<String, WalkPath>> = _walks.asStateFlow()
+    /** Being asked right now. A failed walk is forgotten: asked again when the bundle is reopened or its route changes. */
+    private val walksAsking = HashSet<String>()
+
     /** Cells already looked up this session, so a failing lookup is not retried on every position update. */
     private val namesTried = HashSet<String>()
 
@@ -142,6 +162,23 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         // A bundle's id changes when places come and go: keep its card open and its coupon switch on.
         viewModelScope.launch {
             bundles.collect { items -> follow(items.map { it.bundle }) }
+        }
+        // The open bundle's walk along the streets: asked once per stop order and start (snapped to ~100m).
+        viewModelScope.launch {
+            combine(_openBundle, bundles) { id, items -> items.firstOrNull { it.bundle.id == id } }
+                .distinctUntilChanged { a, b -> a?.walkKey == b?.walkKey }
+                .collect { item ->
+                    if (item == null) return@collect
+                    val key = item.walkKey
+                    val line = item.line
+                    if (line.size < 2 || key in _walks.value || !walksAsking.add(key)) return@collect
+                    launch {
+                        runCatching { walkPath(c.walk, line) }
+                            .onSuccess { w -> _walks.value = _walks.value + (key to w) }
+                            .onFailure { Log.w("SnapSpot", "walking route failed", it) }
+                        walksAsking.remove(key)
+                    }
+                }
         }
         // Name bundles the first time they show up (the alert path only reads this cache).
         viewModelScope.launch {
