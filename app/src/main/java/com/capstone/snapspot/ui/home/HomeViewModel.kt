@@ -48,6 +48,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
@@ -141,6 +142,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     /** Cells already looked up this session, so a failing lookup is not retried on every position update. */
     private val namesTried = HashSet<String>()
 
+    /** Neighborhood name of where the user is, once looked up (cached per ~1km cell, region-names.json). */
+    val hereName: StateFlow<String?> = combine(here, c.regionNames.names) { at, _ -> at?.let { c.regionNames.cached(it) } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     /** Regions registered right now, refresh region excluded. */
     val watching: StateFlow<Int> = combine(window, perms) { w, p ->
         if (!p.net || w == null) 0 else w.byGroup.values.sum()
@@ -187,6 +192,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                     if (c.regionNames.cached(i.bundle.center) != null || !namesTried.add(cellOf(i.bundle.center).key)) continue
                     c.regionNames.resolve(i.bundle.center) { c.kakao.regionName(it) }
                 }
+            }
+        }
+        // Name the cell the user is in, once per cell per session (the home headline says "지금 성수동이에요").
+        viewModelScope.launch {
+            here.filterNotNull().distinctUntilChangedBy { cellOf(it).key }.collect { at ->
+                if (c.regionNames.cached(at) == null && namesTried.add(cellOf(at).key)) c.regionNames.resolve(at) { c.kakao.regionName(it) }
             }
         }
     }
@@ -295,7 +306,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     /** Shows the alert a branch would send, using the nearest registered branch of this brand. */
     fun testCoupon(cp: Coupon) = viewModelScope.launch {
         val key = brandKey(cp.brand)
-        val id = window.value?.branches?.keys?.firstOrNull { it.startsWith("b|$key|") } ?: "b|$key|test"
+        // The nearest registered branch, like the alert the user would get walking by.
+        val at = here.value
+        val id = window.value?.branches?.filter { it.key.startsWith("b|$key|") }
+            ?.minByOrNull { (_, b) -> at?.let { distanceMeters(it, Coords(b.latitude, b.longitude)) } ?: 0.0 }?.key
+            ?: "b|$key|test"
         c.alerts.onBranchEnter(id, force = true)
     }
 

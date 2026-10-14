@@ -11,9 +11,11 @@ import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.ContextCompat
 import com.capstone.snapspot.MainActivity
 import com.capstone.snapspot.R
+import com.capstone.snapspot.ui.theme.SnapColors
 
 const val CHANNEL_ID = "nearby-places"
 
@@ -40,7 +42,7 @@ class AndroidNotifier(private val ctx: Context) : Notifier {
         val pending = PendingIntent.getActivity(ctx, id, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val n = NotificationCompat.Builder(ctx, CHANNEL_ID)
             .setSmallIcon(R.drawable.notification_icon)
-            .setColor(0xFF2D7A57.toInt())
+            .setColor(SnapColors.ink.toArgb())
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))

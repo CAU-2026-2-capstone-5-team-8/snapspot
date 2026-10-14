@@ -2,6 +2,7 @@ package com.capstone.snapspot.ui.add
 
 import android.app.Application
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.capstone.snapspot.BuildConfig
@@ -144,7 +145,8 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            updateAt(batch, i) { it.copy(stage = Stage.READY, readError = "스크린샷을 읽지 못했어요\n${e.message ?: e.javaClass.simpleName}") }
+            Log.w("SnapSpot", "screenshot read failed", e)
+            updateAt(batch, i) { it.copy(stage = Stage.READY, readError = "스크린샷을 읽지 못했어요\n${readErrorMessage(e)}") }
         }
     }
 

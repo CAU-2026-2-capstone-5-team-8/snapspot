@@ -3,6 +3,7 @@ package com.capstone.snapspot.ui.map
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,12 +29,16 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.res.ResourcesCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.capstone.snapspot.R
 import com.capstone.snapspot.SnapSpotApp
 import com.capstone.snapspot.core.Coords
 import com.capstone.snapspot.ui.components.MapUnavailable
 import com.capstone.snapspot.ui.theme.SnapColors
+import com.capstone.snapspot.ui.theme.SnapShapes
+import com.kakao.vectormap.GestureType
 import com.kakao.vectormap.KakaoMap
 import com.kakao.vectormap.KakaoMapReadyCallback
 import com.kakao.vectormap.LatLng
@@ -51,11 +56,24 @@ import com.kakao.vectormap.shape.PolylineOptions
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** A saved place: pin plus its alert radius (none when 0). `number`: position in an open bundle's route, shown instead of the initial. */
-data class MapPlace(val id: String, val at: Coords, val radiusM: Double, val initial: String, val ended: Boolean, val selected: Boolean, val number: Int? = null)
+/**
+ * A saved place: pin plus its alert radius (none when 0). `number`: position in an open bundle's route,
+ * shown instead of the initial. `near`: the user is inside the radius. `couponStop`: a coupon branch on the route.
+ */
+data class MapPlace(
+    val id: String,
+    val at: Coords,
+    val radiusM: Double,
+    val initial: String,
+    val ended: Boolean,
+    val selected: Boolean,
+    val number: Int? = null,
+    val near: Boolean = false,
+    val couponStop: Boolean = false,
+)
 
-/** A registered franchise branch: a small dot, no radius. */
-data class MapBranch(val id: String, val at: Coords, val initial: String, val urgent: Boolean, val near: Boolean)
+/** A registered coupon branch: a small square with a gift icon, no radius. */
+data class MapBranch(val id: String, val at: Coords, val urgent: Boolean, val near: Boolean)
 
 /** Where the camera should go; `seq` changes for every request so the same spot can be re-focused. */
 data class MapFocus(val at: Coords, val seq: Long, val zoom: Int = 16)
@@ -63,9 +81,10 @@ data class MapFocus(val at: Coords, val seq: Long, val zoom: Int = 16)
 private val SEOUL = Coords(37.5665, 126.9780)
 
 /**
- * Kakao map with saved places (pin + alert radius circle), registered branches (dots) and the
- * user. Drawn inside a rounded card: the map renders on a SurfaceView that ignores Compose
- * clipping, so the corners are masked with the page color instead.
+ * Kakao map with saved places (pin + alert radius), registered branches and the user. Full-bleed by default;
+ * with `cornerRadius` > 0 it sits in a rounded card, and since the map renders on a SurfaceView that ignores
+ * Compose clipping, the corners are masked with `maskColor`. `padBottom` keeps the camera's center above a
+ * bottom sheet covering the map.
  */
 @Composable
 fun SpotMap(
@@ -75,11 +94,12 @@ fun SpotMap(
     focus: MapFocus?,
     modifier: Modifier = Modifier,
     refresh: Pair<Coords, Double>? = null,
-    cornerRadius: Dp = 24.dp,
-    maskColor: Color = SnapColors.paper,
+    cornerRadius: Dp = 0.dp,
+    maskColor: Color = SnapColors.bg,
     interactive: Boolean = true,
     /** An open bundle's walking route, drawn as a line through these points in order. */
     route: List<Coords> = emptyList(),
+    padBottom: Dp = 0.dp,
     onPinClick: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
@@ -93,6 +113,7 @@ fun SpotMap(
     val onPin by rememberUpdatedState(onPinClick)
     val startAt = remember { focus?.at ?: here ?: places.firstOrNull()?.at ?: SEOUL }
     val density = LocalDensity.current.density
+    val face = remember { ResourcesCompat.getFont(ctx, R.font.pretendard_bold) ?: Typeface.DEFAULT_BOLD }
 
     val view = remember {
         MapView(ctx).apply {
@@ -140,16 +161,20 @@ fun SpotMap(
 
     LaunchedEffect(map, places, branches, here, refresh, route) {
         val m = map ?: return@LaunchedEffect
-        draw(m, places, branches, here, refresh, route, density)
+        draw(m, places, branches, here, refresh, route, density, face)
     }
     LaunchedEffect(map, interactive) {
         val m = map ?: return@LaunchedEffect
         if (!interactive) {
-            listOf(com.kakao.vectormap.GestureType.Pan, com.kakao.vectormap.GestureType.Zoom, com.kakao.vectormap.GestureType.Rotate,
-                com.kakao.vectormap.GestureType.Tilt, com.kakao.vectormap.GestureType.OneFingerDoubleTap,
-                com.kakao.vectormap.GestureType.TwoFingerSingleTap, com.kakao.vectormap.GestureType.OneFingerZoom,
-                com.kakao.vectormap.GestureType.RotateZoom).forEach { m.setGestureEnable(it, false) }
+            listOf(
+                GestureType.Pan, GestureType.Zoom, GestureType.Rotate, GestureType.Tilt, GestureType.OneFingerDoubleTap,
+                GestureType.TwoFingerSingleTap, GestureType.OneFingerZoom, GestureType.RotateZoom,
+            ).forEach { m.setGestureEnable(it, false) }
         }
+    }
+    LaunchedEffect(map, padBottom) {
+        val m = map ?: return@LaunchedEffect
+        m.setPadding(0, 0, 0, (padBottom.value * density).toInt())
     }
     LaunchedEffect(map, focus) {
         val m = map ?: return@LaunchedEffect
@@ -158,16 +183,19 @@ fun SpotMap(
     }
 
     Box(
-        modifier.drawWithContent {
-            drawContent()
-            val r = cornerRadius.toPx()
-            val mask = Path().apply {
-                fillType = PathFillType.EvenOdd
-                addRect(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height))
-                addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(r, r)))
-            }
-            drawPath(mask, maskColor)
-        },
+        modifier.then(
+            if (cornerRadius <= 0.dp) Modifier
+            else Modifier.drawWithContent {
+                drawContent()
+                val r = cornerRadius.toPx()
+                val mask = Path().apply {
+                    fillType = PathFillType.EvenOdd
+                    addRect(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height))
+                    addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(r, r)))
+                }
+                drawPath(mask, maskColor)
+            },
+        ),
     ) {
         AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
         if (failed != null) MapUnavailable(failed!!)
@@ -187,36 +215,32 @@ private fun circle(center: Coords, radiusM: Double): MapPoints {
     return MapPoints.fromLatLng(pts)
 }
 
-private fun withAlpha(c: Color, a: Float) = c.copy(alpha = a).toArgb()
-
-private fun draw(m: KakaoMap, places: List<MapPlace>, branches: List<MapBranch>, here: Coords?, refresh: Pair<Coords, Double>?, route: List<Coords>, density: Float) {
+private fun draw(
+    m: KakaoMap, places: List<MapPlace>, branches: List<MapBranch>, here: Coords?, refresh: Pair<Coords, Double>?,
+    route: List<Coords>, density: Float, face: Typeface,
+) {
     val shapes = m.shapeManager?.layer ?: return
     val labels = m.labelManager?.layer ?: return
     shapes.removeAll()
     labels.removeAll()
 
     refresh?.let { (c, r) ->
-        shapes.addPolygon(PolygonOptions.from(circle(c, r), PolygonStyles.from(withAlpha(SnapColors.highlight, 0.10f), 2f * density, withAlpha(SnapColors.amber, 0.6f))))
+        shapes.addPolygon(PolygonOptions.from(circle(c, r), PolygonStyles.from(REFRESH_AREA.fill.toArgb(), 1.5f * density, REFRESH_AREA.stroke.toArgb())))
     }
     for (p in places) {
         if (p.radiusM <= 0) continue
-        val tone = if (p.ended) SnapColors.muted else SnapColors.green
-        shapes.addPolygon(
-            PolygonOptions.from(circle(p.at, p.radiusM), PolygonStyles.from(withAlpha(tone, if (p.selected) 0.25f else 0.15f), 1.5f * density, withAlpha(tone, 0.9f))),
-        )
+        val s = radiusStyle(p)
+        shapes.addPolygon(PolygonOptions.from(circle(p.at, p.radiusM), PolygonStyles.from(s.fill.toArgb(), 1.5f * density, s.stroke.toArgb())))
     }
     if (route.size >= 2) {
         shapes.addPolyline(PolylineOptions.from(MapPoints.fromLatLng(route.map { latLng(it) }), 3f * density, SnapColors.ink.toArgb()))
     }
     for (b in branches) {
-        val fill = if (b.near) SnapColors.highlight else SnapColors.surface
-        val ring = if (b.urgent) SnapColors.urgent else SnapColors.ink
-        val bmp = badge(b.initial, fill.toArgb(), ring.toArgb(), SnapColors.ink.toArgb(), 22, if (b.urgent) 2.5f else 1.5f, density)
+        val bmp = badge(branchPin(b), density, face)
         labels.addLabel(LabelOptions.from(b.id, latLng(b.at)).setStyles(LabelStyles.from(LabelStyle.from(bmp).setAnchorPoint(0.5f, 0.5f))).setTag(b.id).setClickable(true))
     }
     for (p in places) {
-        val fill = if (p.ended) SnapColors.muted else SnapColors.green
-        val bmp = badge(p.number?.toString() ?: p.initial, fill.toArgb(), SnapColors.surface.toArgb(), SnapColors.surface.toArgb(), if (p.selected) 34 else 28, 3f, density)
+        val bmp = badge(placePin(p), density, face)
         labels.addLabel(
             LabelOptions.from(p.id, latLng(p.at)).setStyles(LabelStyles.from(LabelStyle.from(bmp).setAnchorPoint(0.5f, 0.5f)))
                 // Numbered route pins sit above the user's dot (rank 20), so standing on stop 1 does not hide its number.
@@ -224,29 +248,53 @@ private fun draw(m: KakaoMap, places: List<MapPlace>, branches: List<MapBranch>,
         )
     }
     here?.let {
-        val bmp = badge("", SnapColors.ink.toArgb(), SnapColors.surface.toArgb(), 0, 16, 3f, density)
+        val bmp = badge(ME_PIN, density, face)
         labels.addLabel(LabelOptions.from("me", latLng(it)).setStyles(LabelStyles.from(LabelStyle.from(bmp).setAnchorPoint(0.5f, 0.5f))).setRank(20))
     }
 }
 
-/** A round badge with an optional initial, drawn at `sizeDp`. */
-private fun badge(text: String, fill: Int, ring: Int, textColor: Int, sizeDp: Int, ringDp: Float, density: Float): Bitmap {
-    val size = (sizeDp * density).toInt()
+/** Draws a [PinStyle]: ring, then fill inset by the ring width, then the text centered. */
+private fun badge(s: PinStyle, density: Float, face: Typeface): Bitmap {
+    val size = (s.sizeDp * density).toInt()
     val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp)
     val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    val r = size / 2f
-    p.color = ring
-    c.drawCircle(r, r, r, p)
-    p.color = fill
-    c.drawCircle(r, r, r - ringDp * density, p)
-    if (text.isNotEmpty()) {
-        p.color = textColor
-        p.textAlign = Paint.Align.CENTER
-        p.typeface = Typeface.DEFAULT_BOLD
-        p.textSize = size * 0.48f
-        val y = r - (p.descent() + p.ascent()) / 2
-        c.drawText(text, r, y, p)
+    val half = size / 2f
+    fun shape(inset: Float) {
+        if (s.shape == PinShape.CIRCLE) c.drawCircle(half, half, half - inset, p)
+        else {
+            val r = (SnapShapes.PIN_CORNER_DP * density - inset).coerceAtLeast(0f)
+            c.drawRoundRect(RectF(inset, inset, size - inset, size - inset), r, r, p)
+        }
     }
+    p.color = s.ring.toArgb()
+    shape(0f)
+    p.color = s.fill.toArgb()
+    shape(s.ringDp * density)
+    if (s.text.isNotEmpty()) {
+        p.color = s.textColor.toArgb()
+        p.textAlign = Paint.Align.CENTER
+        p.typeface = face
+        p.textSize = size * 0.46f
+        c.drawText(s.text, half, half - (p.descent() + p.ascent()) / 2, p)
+    }
+    if (s.icon) gift(c, half, half, size * 0.56f, s.textColor.toArgb())
     return bmp
+}
+
+/** A gift box outline (lid, body, ribbon, bow) `w` wide, centered on (cx, cy): coupon branches carry it instead of a letter. */
+private fun gift(c: Canvas, cx: Float, cy: Float, w: Float, color: Int) {
+    val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        style = Paint.Style.STROKE
+        strokeWidth = w * 0.12f
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+    }
+    val h = w / 2
+    c.drawRect(cx - h, cy - w * 0.16f, cx + h, cy + w * 0.04f, p)
+    c.drawRect(cx - h * 0.82f, cy + w * 0.04f, cx + h * 0.82f, cy + w * 0.46f, p)
+    c.drawLine(cx, cy - w * 0.16f, cx, cy + w * 0.46f, p)
+    c.drawCircle(cx - w * 0.15f, cy - w * 0.3f, w * 0.12f, p)
+    c.drawCircle(cx + w * 0.15f, cy - w * 0.3f, w * 0.12f, p)
 }

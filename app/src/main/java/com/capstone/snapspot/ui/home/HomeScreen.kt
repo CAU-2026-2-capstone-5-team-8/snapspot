@@ -1,8 +1,9 @@
 package com.capstone.snapspot.ui.home
 
-import androidx.compose.foundation.BorderStroke
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,72 +12,110 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.border
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Switch
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.capstone.snapspot.core.BRANCH_RADIUS_M
 import com.capstone.snapspot.core.Coords
-import com.capstone.snapspot.core.daysLeft
 import com.capstone.snapspot.core.dDay
+import com.capstone.snapspot.core.daysLeft
 import com.capstone.snapspot.core.distanceMeters
 import com.capstone.snapspot.core.formatDistance
 import com.capstone.snapspot.core.model.Coupon
 import com.capstone.snapspot.core.model.Place
 import com.capstone.snapspot.core.placeEnded
-import com.capstone.snapspot.core.untilLabel
-import com.capstone.snapspot.ui.components.Card
+import com.capstone.snapspot.ui.components.BigTitle
+import com.capstone.snapspot.ui.components.ConfirmDelete
 import com.capstone.snapspot.ui.components.Dot
-import com.capstone.snapspot.ui.components.Fact
-import com.capstone.snapspot.ui.components.NearBand
+import com.capstone.snapspot.ui.components.FloatingChip
+import com.capstone.snapspot.ui.components.Gap
+import com.capstone.snapspot.ui.components.NearChip
 import com.capstone.snapspot.ui.components.Notice
 import com.capstone.snapspot.ui.components.Segmented
+import com.capstone.snapspot.ui.components.SheetHandle
 import com.capstone.snapspot.ui.components.Shot
 import com.capstone.snapspot.ui.map.MapBranch
 import com.capstone.snapspot.ui.map.MapPlace
 import com.capstone.snapspot.ui.map.SpotMap
 import com.capstone.snapspot.ui.theme.SnapColors
-import com.capstone.snapspot.ui.theme.SnapFonts
+import com.capstone.snapspot.ui.theme.SnapShapes
+import com.capstone.snapspot.ui.theme.SnapSpace
 import com.capstone.snapspot.ui.theme.SnapType
+import kotlinx.coroutines.launch
 
 private enum class Tab { PLACES, COUPONS }
 
+/** Extra bottom padding for the sheet list while collapsed: the part of the list that sits below the visible peek. */
+internal fun collapsedListPadding(sheetHeight: androidx.compose.ui.unit.Dp, peek: androidx.compose.ui.unit.Dp, collapsed: Boolean) =
+    if (collapsed) (sheetHeight - peek).coerceAtLeast(0.dp) else 0.dp
+
 private fun initial(s: String) = s.trim().firstOrNull()?.toString() ?: "?"
 
+/** Rows of one list share a card: only the first and last rows round their outer corners. */
+private fun groupShape(i: Int, n: Int): Shape {
+    val r = 10.dp
+    return when {
+        n == 1 -> SnapShapes.card
+        i == 0 -> RoundedCornerShape(topStart = r, topEnd = r)
+        i == n - 1 -> RoundedCornerShape(bottomStart = r, bottomEnd = r)
+        else -> RoundedCornerShape(0.dp)
+    }
+}
+
+/**
+ * The map fills the screen; the list lives in a bottom sheet (45% when collapsed). An open bundle swaps the sheet
+ * for its walking route and the top-left chip for a way back.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     vm: HomeViewModel,
@@ -88,6 +127,7 @@ fun HomeScreen(
     val places by vm.places.collectAsState()
     val coupons by vm.coupons.collectAsState()
     val here by vm.here.collectAsState()
+    val hereName by vm.hereName.collectAsState()
     val win by vm.window.collectAsState()
     val perms by vm.perms.collectAsState()
     val watching by vm.watching.collectAsState()
@@ -102,150 +142,237 @@ fun HomeScreen(
     var deletingPlace by remember { mutableStateOf<Place?>(null) }
     var deletingCoupon by remember { mutableStateOf<Coupon?>(null) }
     val listState = rememberLazyListState()
+    val sheet = rememberBottomSheetScaffoldState()
     val now = System.currentTimeMillis()
+    val near = nearPlaces(places, here, now)
+    val header = listHeader(perms.alertsOn, bundleItems.isNotEmpty())
+    val scope = rememberCoroutineScope()
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+    // Back closes an open route instead of leaving the app.
+    BackHandler(enabled = open != null) { open?.let { vm.toggleBundle(it.bundle.id) } }
+    // Row taps and bundle opens move the map: collapse the sheet so the result is visible.
+    val showMap: () -> Unit = { scope.launch { sheet.bottomSheetState.partialExpand() } }
 
     // Tapping a pin scrolls the list to that row.
-    LaunchedEffect(selected, tab) {
+    LaunchedEffect(selected, tab, open, header) {
         val id = selected ?: return@LaunchedEffect
         val i = places.indexOfFirst { it.id == id }
-        if (tab == Tab.PLACES && i >= 0) listState.animateScrollToItem(i)
+        if (open == null && tab == Tab.PLACES && i >= 0) listState.animateScrollToItem(header + i)
     }
 
     // An open bundle numbers its stops in walking order; coupon stops are the branch the route picked.
     val stops = open?.let { routeStops(it) }.orEmpty()
     val numberOf = stops.mapIndexedNotNull { i, st -> st.placeId?.let { it to i + 1 } }.toMap()
     val mapPlaces = places.map {
-        MapPlace(it.id, Coords(it.latitude, it.longitude), it.radius.toDouble(), initial(it.name), placeEnded(it, now), it.id == selected, numberOf[it.id])
+        MapPlace(
+            // An open route shows the line and numbered stops only: alert circles would clutter it.
+            it.id, Coords(it.latitude, it.longitude), if (open != null) 0.0 else it.radius.toDouble(), initial(it.name), placeEnded(it, now),
+            it.id == selected, numberOf[it.id], near = it.id in near,
+        )
     } + stops.mapIndexedNotNull { i, st ->
-        if (st.placeId != null) null else MapPlace("route-$i", st.at, 0.0, initial(st.name), ended = false, selected = false, number = i + 1)
+        if (st.placeId != null) null
+        else MapPlace("route-$i", st.at, 0.0, initial(st.name), ended = false, selected = false, number = i + 1, couponStop = true)
     }
-    // Along the streets once TMAP has answered; straight between stops until then (or if it fails).
+    // Follows the streets once TMAP answers, straight lines until then.
     val routeLine = if (open == null) emptyList() else walks[open.walkKey]?.line ?: open.line
     val mapBranches = win?.branches.orEmpty().map { (id, b) ->
         val at = Coords(b.latitude, b.longitude)
-        MapBranch(id, at, initial(b.name), b.urgent, here?.let { distanceMeters(it, at) <= 200 } == true)
+        MapBranch(id, at, b.urgent, here?.let { distanceMeters(it, at) <= BRANCH_RADIUS_M } == true)
     }
 
-    Box(Modifier.fillMaxSize().background(SnapColors.paper)) {
-        BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding()) {
-            val mapHeight = maxHeight * 0.55f
-            Column(Modifier.fillMaxSize()) {
-                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("SnapSpot", style = SnapType.logo, modifier = Modifier.weight(1f))
-                    WatchBadge(perms.alertsOn, watching, onStatus)
-                }
-                Box(Modifier.fillMaxWidth().height(mapHeight).padding(horizontal = 16.dp)) {
-                    SpotMap(
-                        places = mapPlaces,
-                        branches = mapBranches,
-                        here = here,
-                        focus = focus,
-                        modifier = Modifier.fillMaxSize(),
-                        route = routeLine,
-                        onPinClick = { id ->
-                            if (places.any { it.id == id }) tab = Tab.PLACES
-                            vm.focusOn(id)
-                        },
-                    )
-                    Box(
-                        Modifier.align(Alignment.TopEnd).padding(12.dp).size(44.dp).shadow(3.dp, CircleShape).clip(CircleShape)
-                            .background(SnapColors.surface).clickable { vm.focusHere() },
-                        contentAlignment = Alignment.Center,
-                    ) { Icon(Icons.Filled.MyLocation, contentDescription = "내 위치로", tint = SnapColors.ink) }
-                }
-                Spacer(Modifier.height(14.dp))
-                Segmented(
-                    options = Tab.entries,
-                    value = tab,
-                    onChange = { tab = it },
-                    format = { if (it == Tab.PLACES) "장소 ${places.size}" else "쿠폰 ${coupons.count { c -> c.active }}" },
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
+    BoxWithConstraints(Modifier.fillMaxSize().background(SnapColors.bg)) {
+        val peek = maxHeight * 0.45f
+        val sheetHeight = maxHeight * 0.88f
+        BottomSheetScaffold(
+            scaffoldState = sheet,
+            sheetPeekHeight = peek,
+            sheetShape = SnapShapes.sheet,
+            sheetContainerColor = SnapColors.bg,
+            sheetShadowElevation = 8.dp,
+            sheetDragHandle = { SheetHandle() },
+            containerColor = SnapColors.bg,
+            sheetContent = {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().height(sheetHeight),
+                    // Collapsed, only `peek` of the 88%-tall list shows: pad the rest so the last rows can scroll to the top.
+                    contentPadding = PaddingValues(
+                        start = SnapSpace.gutter, end = SnapSpace.gutter,
+                        bottom = 96.dp + navBottom + collapsedListPadding(sheetHeight, peek, sheet.bottomSheetState.targetValue == SheetValue.PartiallyExpanded),
+                    ),
                 ) {
-                    if (!perms.alertsOn) {
-                        item {
+                    if (open == null) {
+                        // Header rows: keep in step with listHeader().
+                        item(key = "headline") {
+                            val h = homeHeadline(hereName, near.size, places.size, perms.alertsOn)
+                            BigTitle(
+                                h.kicker,
+                                buildAnnotatedString {
+                                    append(h.before)
+                                    h.count?.let {
+                                        append(" ")
+                                        withStyle(SpanStyle(background = SnapColors.lime, color = SnapColors.limeInk)) { append(it) }
+                                    }
+                                    h.after?.let { append(" "); append(it) }
+                                },
+                                Modifier.padding(start = 4.dp, top = 4.dp, bottom = 12.dp),
+                            )
+                        }
+                        if (!perms.alertsOn) item(key = "notice") {
                             Notice(
                                 if (!perms.net && perms.bg) "휴대폰의 \"Google 위치 정확도\"가 꺼져 있어서 앱을 닫으면 알림이 오지 않아요."
                                 else "앱을 닫아도 알림을 받으려면 알림 권한과 위치 \"항상 허용\"이 필요해요.",
                                 "권한 설정하기" to onAskPermissions,
+                                Modifier.padding(bottom = SnapSpace.gap),
                             )
                         }
-                    }
-                    if (tab == Tab.PLACES) {
-                        if (places.isEmpty()) item {
-                            if (coupons.isEmpty()) Empty("스크린샷 한 장으로 시작해 보세요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요.")
-                            else Empty("저장한 장소가 없어요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요. 쿠폰은 쿠폰 탭에 있어요.")
-                        }
-                        if (bundleItems.isNotEmpty()) item {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (bundleItems.isNotEmpty()) item(key = "bundles") {
+                            LazyRow(Modifier.padding(bottom = SnapSpace.gap), horizontalArrangement = Arrangement.spacedBy(SnapSpace.gap)) {
                                 items(bundleItems, key = { it.bundle.id }) { b ->
-                                    BundleCard(
-                                        b, walks[b.walkKey]?.minutes ?: b.minutes, open = b.bundle.id == openBundle, withCoupons = b.bundle.id in couponsOn,
-                                        onClick = { vm.toggleBundle(b.bundle.id) }, onCoupons = { vm.toggleCoupons(b.bundle.id) }, onPreview = { vm.previewBundle(b.bundle.id) },
-                                    )
+                                    BundleCard(b, walks[b.walkKey]?.minutes ?: b.minutes, Modifier.fillParentMaxWidth(if (bundleItems.size == 1) 1f else 0.86f)) { vm.toggleBundle(b.bundle.id); showMap() }
                                 }
                             }
                         }
-                        // Open bundle: its places in walking order, coupon stops as one-line rows after them.
-                        val shown = if (open != null) stops.mapNotNull { st -> places.firstOrNull { it.id == st.placeId } } else places
-                        items(shown, key = { it.id }) { p ->
-                            val d = here?.let { distanceMeters(it, Coords(p.latitude, p.longitude)) }
-                            PlaceRow(
-                                p, d, ended = placeEnded(p, now), selected = p.id == selected,
-                                onClick = { vm.focusOn(p.id) }, onLongClick = { deletingPlace = p }, number = numberOf[p.id],
+                        item(key = "tabs") {
+                            Segmented(
+                                options = Tab.entries,
+                                value = tab,
+                                onChange = { tab = it },
+                                format = { if (it == Tab.PLACES) "장소 ${places.size}" else "기프티콘 ${coupons.count { c -> c.active }}" },
+                                modifier = Modifier.padding(bottom = SnapSpace.gap),
                             )
                         }
-                        if (open != null) {
-                            items(stops.withIndex().filter { it.value.placeId == null }, key = { "coupon-${it.index}" }) { (i, st) ->
-                                Text("${i + 1}. ${st.name} (쿠폰)", style = SnapType.meta, modifier = Modifier.padding(horizontal = 4.dp))
+                        if (tab == Tab.PLACES) {
+                            if (places.isEmpty()) item(key = "empty") {
+                                if (coupons.isEmpty()) Empty("스크린샷 한 장으로 시작해 보세요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요.")
+                                else Empty("저장한 장소가 없어요", "가 보고 싶은 곳의 스크린샷을 넣으면 근처를 지날 때 알려 드려요. 기프티콘은 기프티콘 탭에 있어요.")
+                            }
+                            itemsIndexed(places, key = { _, p -> p.id }) { i, p ->
+                                PlaceRow(
+                                    p, here?.let { distanceMeters(it, Coords(p.latitude, p.longitude)) }, near = p.id in near,
+                                    ended = placeEnded(p, now), selected = p.id == selected, shape = groupShape(i, places.size),
+                                    onClick = { vm.focusOn(p.id); showMap() }, onLongClick = { deletingPlace = p },
+                                )
+                            }
+                        } else {
+                            if (coupons.isEmpty()) item(key = "empty") { Empty("저장한 기프티콘이 없어요", "기프티콘 스크린샷을 넣으면 그 브랜드 지점 근처에서 알려 드려요.") }
+                            itemsIndexed(coupons, key = { _, c -> c.coupon.id }) { i, item ->
+                                TicketRow(item, now, groupShape(i, coupons.size), onClick = { onCoupon(item.coupon.id) }, onLongClick = { deletingCoupon = item.coupon })
                             }
                         }
                     } else {
-                        if (coupons.isEmpty()) item { Empty("저장한 쿠폰이 없어요", "기프티콘 스크린샷을 넣으면 그 브랜드 지점 근처에서 알려 드려요.") }
-                        items(coupons, key = { it.coupon.id }) { item ->
-                            TicketRow(item, now, onClick = { onCoupon(item.coupon.id) }, onLongClick = { deletingCoupon = item.coupon })
+                        item(key = "bundle-head") {
+                            Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp, bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
+                                BigTitle("가 볼 곳 ${open.route.order.size}곳", "걸어서 ${walks[open.walkKey]?.minutes ?: open.minutes}분", Modifier.weight(1f))
+                                Text("기프티콘 포함", style = SnapType.label)
+                                Gap(6.dp)
+                                Switch(
+                                    checked = open.bundle.id in couponsOn,
+                                    onCheckedChange = { vm.toggleCoupons(open.bundle.id) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = SnapColors.lime, checkedTrackColor = SnapColors.ink, checkedBorderColor = SnapColors.ink,
+                                        uncheckedThumbColor = SnapColors.surface, uncheckedTrackColor = SnapColors.line, uncheckedBorderColor = SnapColors.line,
+                                    ),
+                                )
+                            }
+                        }
+                        if (open.couponsFailed) item(key = "bundle-failed") {
+                            Notice(
+                                if (open.coupons.isEmpty()) "기프티콘 지점을 불러오지 못했어요" else "일부 기프티콘 지점을 불러오지 못했어요",
+                                modifier = Modifier.padding(bottom = SnapSpace.gap),
+                            )
+                        }
+                        itemsIndexed(stops, key = { i, _ -> "stop-$i" }) { i, st ->
+                            val p = places.firstOrNull { it.id == st.placeId }
+                            StopRow(
+                                i + 1, st, p, near = p != null && p.id in near, shape = groupShape(i, stops.size),
+                                onClick = p?.let { { vm.focusOn(it.id); showMap() } },
+                            )
+                        }
+                        item(key = "bundle-preview") {
+                            Text(
+                                "알림 미리 보기",
+                                style = SnapType.button.copy(color = SnapColors.ink2),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(top = SnapSpace.gap).clip(SnapShapes.card)
+                                    .clickable { vm.previewBundle(open.bundle.id) }.padding(vertical = 14.dp),
+                            )
                         }
                     }
                 }
+            },
+        ) { _ ->
+            Box(Modifier.fillMaxSize()) {
+                SpotMap(
+                    places = mapPlaces,
+                    branches = mapBranches,
+                    here = here,
+                    focus = focus,
+                    modifier = Modifier.fillMaxSize(),
+                    route = routeLine,
+                    padBottom = peek,
+                    onPinClick = { id ->
+                        if (places.any { it.id == id }) tab = Tab.PLACES
+                        vm.focusOn(id)
+                    },
+                )
+                Row(
+                    Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (open == null) {
+                        FloatingChip(Modifier.weight(1f, fill = false)) { Text("SnapSpot", style = SnapType.logo) }
+                    } else {
+                        FloatingChip(Modifier.weight(1f, fill = false), onClick = { vm.toggleBundle(open.bundle.id) }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "묶음 닫기", tint = SnapColors.ink, modifier = Modifier.size(18.dp))
+                            Gap(6.dp)
+                            Text(bundleTitle(open.name), style = SnapType.title.copy(fontSize = 15.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    Gap(8.dp)
+                    WatchChip(perms.alertsOn, watching, onStatus)
+                }
+                Box(
+                    Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 60.dp, end = 12.dp).size(44.dp)
+                        .shadow(4.dp, SnapShapes.card).clip(SnapShapes.card).background(SnapColors.surface).clickable { vm.focusHere() },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Filled.MyLocation, contentDescription = "내 위치로", tint = SnapColors.ink, modifier = Modifier.size(20.dp)) }
             }
         }
-        FloatingActionButton(
-            onClick = onAdd,
-            containerColor = SnapColors.green,
-            contentColor = SnapColors.surface,
-            shape = CircleShape,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp).size(64.dp),
-        ) { Icon(Icons.Filled.Add, contentDescription = "스크린샷 추가", modifier = Modifier.size(30.dp)) }
+        if (open == null) {
+            Box(
+                Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(16.dp).size(56.dp)
+                    .shadow(6.dp, SnapShapes.card).clip(SnapShapes.card).background(SnapColors.ink).clickable(onClick = onAdd),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Add, contentDescription = "스크린샷 추가", tint = SnapColors.lime, modifier = Modifier.size(28.dp)) }
+        }
     }
 
     deletingPlace?.let { p ->
         ConfirmDelete("${p.name} 삭제", "이 장소의 근처 알림도 함께 꺼져요.", onConfirm = { vm.deletePlace(p); deletingPlace = null }, onDismiss = { deletingPlace = null })
     }
     deletingCoupon?.let { cp ->
-        ConfirmDelete("${cp.brand} 쿠폰 삭제", "이 쿠폰의 지점 알림도 함께 꺼져요.", onConfirm = { vm.deleteCoupon(cp); deletingCoupon = null }, onDismiss = { deletingCoupon = null })
+        ConfirmDelete("${cp.brand} 기프티콘 삭제", "이 기프티콘의 지점 알림도 함께 꺼져요.", onConfirm = { vm.deleteCoupon(cp); deletingCoupon = null }, onDismiss = { deletingCoupon = null })
     }
 }
 
 @Composable
-private fun WatchBadge(on: Boolean, watching: Int, onClick: () -> Unit) {
-    Row(
-        Modifier.clip(RoundedCornerShape(20.dp)).background(SnapColors.surface).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Dot(if (on) SnapColors.green else SnapColors.amber)
-        Text(if (on) "${watching}곳 감시 ›" else "알림 꺼짐 ›", fontFamily = SnapFonts.body, fontWeight = FontWeight.Medium, color = SnapColors.ink)
+private fun WatchChip(on: Boolean, watching: Int, onClick: () -> Unit) {
+    FloatingChip(onClick = onClick) {
+        Dot(if (on) SnapColors.limeDeep else SnapColors.urgent)
+        Gap(6.dp)
+        Text(if (on) "알림 ${watching}곳 ›" else "알림 꺼짐 ›", style = SnapType.label.copy(color = SnapColors.ink), maxLines = 1)
     }
 }
 
 @Composable
 private fun Empty(title: String, body: String) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 28.dp, horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(
+        Modifier.fillMaxWidth().clip(SnapShapes.card).background(SnapColors.surface).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Text(title, style = SnapType.title)
         Text(body, style = SnapType.meta)
     }
@@ -253,87 +380,57 @@ private fun Empty(title: String, body: String) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PlaceRow(p: Place, distance: Double?, ended: Boolean, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, number: Int? = null) {
-    val near = distance != null && distance <= p.radius
-    Card(
-        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        border = BorderStroke(if (near || selected) 1.5.dp else 1.dp, if (near || selected) SnapColors.ink else SnapColors.line),
+private fun PlaceRow(
+    p: Place, distance: Double?, near: Boolean, ended: Boolean, selected: Boolean, shape: Shape,
+    onClick: () -> Unit, onLongClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clip(shape).background(if (selected) SnapColors.line else SnapColors.surface)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = SnapSpace.card, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column {
-            if (near) NearBand("지금 근처예요")
-            Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (number != null) {
-                    Box(Modifier.size(24.dp).clip(CircleShape).background(SnapColors.ink), contentAlignment = Alignment.Center) {
-                        Text("$number", style = SnapType.label.copy(color = SnapColors.surface))
-                    }
-                }
-                Shot(p.imageUri, 52.dp, 68.dp)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(p.name, style = SnapType.title.copy(color = if (ended) SnapColors.muted else SnapColors.ink), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(p.category, style = SnapType.label.copy(color = SnapColors.green))
-                        Fact("반경 ${p.radius}m")
-                        if (ended) Fact("운영 종료") else untilLabel(p.endDate)?.let { Fact(it) }
-                    }
-                    if (p.note.isNotBlank()) Text(p.note, style = SnapType.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (distance != null && !near) Text(formatDistance(distance), style = SnapType.distance)
-            }
+        Shot(p.imageUri, 40.dp, 40.dp, modifier = if (ended) Modifier.alpha(0.5f) else Modifier)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(p.name, style = SnapType.title.copy(fontSize = 15.sp, color = if (ended) SnapColors.muted else SnapColors.ink), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(placeMeta(p, ended), style = SnapType.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        when {
+            near -> NearChip()
+            distance != null -> Text(formatDistance(distance), style = SnapType.label)
         }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TicketRow(item: CouponItem, now: Long, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun TicketRow(item: CouponItem, now: Long, shape: Shape, onClick: () -> Unit, onLongClick: () -> Unit) {
     val c = item.coupon
-    val days = daysLeft(c, now)
-    val near = item.active && item.nearest != null && item.nearest.second <= 200
-    val border = when {
-        near -> BorderStroke(1.5.dp, SnapColors.ink)
-        item.urgent -> BorderStroke(1.5.dp, SnapColors.urgent)
-        else -> BorderStroke(1.dp, SnapColors.line)
-    }
-    Card(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick), border = border) {
-        Column(Modifier.background(if (item.active) SnapColors.surface else SnapColors.paper)) {
-            if (near) NearBand("지금 근처: ${item.nearest!!.first}")
-            Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Shot(c.imageUri, 48.dp, 64.dp)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(c.brand, fontFamily = SnapFonts.display, fontSize = SnapType.title.fontSize, color = if (item.active) SnapColors.ink else SnapColors.muted, maxLines = 1)
-                    Text(c.benefit, style = SnapType.body.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        when {
-                            c.usedAt != null -> "사용한 쿠폰이에요"
-                            !item.active -> "기간이 지났어요"
-                            item.nearest != null -> "가장 가까운 지점  ${item.nearest.first}  ${formatDistance(item.nearest.second)}"
-                            else -> untilLabel(c.expiresAt) ?: "유효기간 없음"
-                        },
-                        style = SnapType.meta, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (item.active) dDay(days)?.let {
-                    Text(it, fontFamily = SnapFonts.display, fontSize = SnapType.distance.fontSize, color = if (item.urgent) SnapColors.urgent else SnapColors.green)
-                }
+    val near = item.active && item.nearest != null && item.nearest.second <= BRANCH_RADIUS_M
+    Row(
+        Modifier.fillMaxWidth().clip(shape).background(SnapColors.surface)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = SnapSpace.card, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Shot(c.imageUri, 40.dp, 40.dp, modifier = if (item.active) Modifier else Modifier.alpha(0.5f))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(c.brand, style = SnapType.title.copy(fontSize = 15.sp, color = if (item.active) SnapColors.ink else SnapColors.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(couponMeta(item), style = SnapType.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        when {
+            near -> NearChip()
+            item.active -> dDay(daysLeft(c, now))?.let {
+                Text(it, style = SnapType.label.copy(fontWeight = FontWeight.Bold, color = if (item.urgent) SnapColors.urgent else SnapColors.ink2))
             }
         }
     }
 }
 
-@Composable
-private fun ConfirmDelete(title: String, body: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title, style = SnapType.title) },
-        text = { Text(body, style = SnapType.body) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("삭제", color = SnapColors.amber, fontWeight = FontWeight.Bold) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("취소", color = SnapColors.ink) } },
-        containerColor = SnapColors.surface,
-    )
-}
-
 /** One stop of an open bundle's route: a saved place, or the branch picked for a coupon brand. */
-private class RouteStop(val placeId: String?, val name: String, val at: Coords)
+private class RouteStop(val placeId: String?, val name: String, val at: Coords, val brand: String? = null)
 
 private fun routeStops(b: BundleItem): List<RouteStop> = b.route.order.indices.map { i ->
     val s = b.route.order[i]
@@ -342,32 +439,59 @@ private fun routeStops(b: BundleItem): List<RouteStop> = b.route.order.indices.m
         val p = b.bundle.places[s]
         RouteStop(p.id, p.name, Coords(p.latitude, p.longitude))
     } else {
-        val br = b.coupons[s - b.bundle.places.size].branches[k]
-        RouteStop(null, br.name, Coords(br.latitude, br.longitude))
+        val cs = b.coupons[s - b.bundle.places.size]
+        val br = cs.branches[k]
+        RouteStop(null, br.name, Coords(br.latitude, br.longitude), cs.brand)
     }
 }
 
 @Composable
-private fun BundleCard(b: BundleItem, minutes: Int, open: Boolean, withCoupons: Boolean, onClick: () -> Unit, onCoupons: () -> Unit, onPreview: () -> Unit) {
-    val fg = if (open) SnapColors.surface else SnapColors.ink
-    Column(
-        Modifier.width(220.dp).clip(RoundedCornerShape(16.dp))
-            .background(if (open) SnapColors.ink else SnapColors.surface)
-            .border(1.dp, SnapColors.line, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick).padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+private fun StopRow(number: Int, stop: RouteStop, place: Place?, near: Boolean, shape: Shape, onClick: (() -> Unit)?) {
+    Row(
+        Modifier.fillMaxWidth().clip(shape).background(SnapColors.surface)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = SnapSpace.card, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(b.name, style = SnapType.title.copy(color = fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text("가 볼 곳 ${b.bundle.places.size}곳 · 걸어서 약 ${minutes}분", style = SnapType.meta.copy(color = if (open) SnapColors.surface else SnapColors.muted))
-        if (open) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("쿠폰 쓸 곳 포함", style = SnapType.meta.copy(color = fg), modifier = Modifier.weight(1f))
-                Switch(checked = withCoupons, onCheckedChange = { onCoupons() })
-            }
-            if (b.couponsFailed) Text(if (b.coupons.isEmpty()) "쿠폰 지점을 불러오지 못했어요" else "일부 쿠폰 지점을 불러오지 못했어요", style = SnapType.meta.copy(color = SnapColors.surface))
-            TextButton(onClick = onPreview, contentPadding = PaddingValues(0.dp)) {
-                Text("알림 미리보기", style = SnapType.meta.copy(color = SnapColors.highlight))
-            }
+        StopNumber(number, coupon = place == null)
+        if (place != null) Shot(place.imageUri, 40.dp, 40.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(stop.name, style = SnapType.title.copy(fontSize = 15.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (place != null) place.category else "기프티콘 · ${stop.brand.orEmpty()}", style = SnapType.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        if (near) NearChip()
+    }
+}
+
+/** Route numbers match the map: ink circle with a lime digit for places, white rounded square for coupon branches. */
+@Composable
+private fun StopNumber(n: Int, coupon: Boolean) {
+    val shape = if (coupon) RoundedCornerShape(4.dp) else CircleShape
+    Box(
+        Modifier.size(24.dp).clip(shape).background(if (coupon) SnapColors.surface else SnapColors.ink)
+            .then(if (coupon) Modifier.border(2.dp, SnapColors.ink, shape) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("$n", style = SnapType.meta.copy(fontWeight = FontWeight.Bold, color = if (coupon) SnapColors.ink else SnapColors.lime))
+    }
+}
+
+@Composable
+private fun BundleCard(b: BundleItem, minutes: Int, modifier: Modifier, onOpen: () -> Unit) {
+    Row(
+        modifier.clip(SnapShapes.card).background(SnapColors.surface).clickable(onClick = onOpen).padding(SnapSpace.card),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(bundleTitle(b.name), style = SnapType.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("가 볼 곳 ${b.route.order.size}곳 · 걸어서 ${minutes}분", style = SnapType.meta, maxLines = 1)
+        }
+        Text(
+            "동선 보기",
+            style = SnapType.meta.copy(fontWeight = FontWeight.ExtraBold, color = SnapColors.lime),
+            modifier = Modifier.clip(SnapShapes.small).background(SnapColors.ink).padding(horizontal = 10.dp, vertical = 8.dp),
+        )
     }
 }

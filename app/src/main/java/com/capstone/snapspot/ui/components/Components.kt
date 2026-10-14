@@ -10,9 +10,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,9 +24,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -36,24 +40,36 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.capstone.snapspot.ui.theme.SnapColors
-import com.capstone.snapspot.ui.theme.SnapFonts
+import com.capstone.snapspot.ui.theme.SnapShapes
+import com.capstone.snapspot.ui.theme.SnapSpace
 import com.capstone.snapspot.ui.theme.SnapType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** A saved screenshot, decoded small off the main thread. */
 @Composable
-fun Shot(uri: String?, width: Dp, height: Dp, modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Crop) {
+fun Shot(
+    uri: String?,
+    width: Dp,
+    height: Dp,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+    shape: Shape = SnapShapes.small,
+) {
     val ctx = LocalContext.current
     val image by produceState<ImageBitmap?>(null, uri) {
         value = if (uri == null) null else withContext(Dispatchers.IO) {
@@ -63,10 +79,7 @@ fun Shot(uri: String?, width: Dp, height: Dp, modifier: Modifier = Modifier, con
             }.getOrNull()
         }
     }
-    Box(
-        modifier.size(width, height).clip(RoundedCornerShape(10.dp)).background(SnapColors.greenSoft),
-        contentAlignment = Alignment.Center,
-    ) {
+    Box(modifier.size(width, height).clip(shape).background(SnapColors.line), contentAlignment = Alignment.Center) {
         image?.let { Image(it, contentDescription = null, contentScale = contentScale, modifier = Modifier.fillMaxSize()) }
     }
 }
@@ -82,8 +95,8 @@ fun LargeShot(uri: String?, modifier: Modifier = Modifier) {
     }
     Box(modifier.fillMaxWidth().heightIn(min = 200.dp), contentAlignment = Alignment.Center) {
         val img = image
-        if (img != null) Image(img, contentDescription = "쿠폰 이미지", contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth())
-        else Text(if (uri == null) "쿠폰 이미지가 없어요" else "", style = SnapType.meta)
+        if (img != null) Image(img, contentDescription = "기프티콘 이미지", contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth())
+        else Text(if (uri == null) "기프티콘 이미지가 없어요" else "", style = SnapType.meta)
     }
 }
 
@@ -93,11 +106,16 @@ fun PrimaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Modif
         onClick = onClick,
         enabled = enabled && !busy,
         modifier = modifier.heightIn(min = 52.dp),
-        shape = RoundedCornerShape(14.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = SnapColors.green, disabledContainerColor = SnapColors.line),
+        shape = SnapShapes.card,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = SnapColors.ink,
+            contentColor = SnapColors.surface,
+            disabledContainerColor = SnapColors.line,
+            disabledContentColor = SnapColors.muted,
+        ),
     ) {
-        if (busy) CircularProgressIndicator(Modifier.size(18.dp), color = SnapColors.surface, strokeWidth = 2.dp)
-        else Text(label, fontFamily = SnapFonts.body, fontWeight = FontWeight.Bold)
+        if (busy) CircularProgressIndicator(Modifier.size(18.dp), color = SnapColors.ink, strokeWidth = 2.dp)
+        else Text(label, style = SnapType.button, maxLines = 1)
     }
 }
 
@@ -106,25 +124,33 @@ fun SecondaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Mod
     OutlinedButton(
         onClick = onClick,
         enabled = !busy,
-        modifier = modifier.heightIn(min = 48.dp),
-        shape = RoundedCornerShape(14.dp),
+        modifier = modifier.heightIn(min = 52.dp),
+        shape = SnapShapes.card,
         border = BorderStroke(1.dp, SnapColors.line),
         colors = ButtonDefaults.outlinedButtonColors(containerColor = SnapColors.surface, contentColor = SnapColors.ink),
     ) {
-        if (busy) CircularProgressIndicator(Modifier.size(16.dp), color = SnapColors.green, strokeWidth = 2.dp)
-        else Text(label, fontFamily = SnapFonts.body, fontWeight = FontWeight.Medium)
+        if (busy) CircularProgressIndicator(Modifier.size(16.dp), color = SnapColors.ink, strokeWidth = 2.dp)
+        else Text(label, style = SnapType.button, maxLines = 1)
     }
 }
 
 @Composable
-fun QuietButton(label: String, onClick: () -> Unit, color: Color = SnapColors.muted) {
-    TextButton(onClick = onClick) { Text(label, fontFamily = SnapFonts.body, fontWeight = FontWeight.Medium, color = color) }
+fun QuietButton(label: String, onClick: () -> Unit, color: Color = SnapColors.ink2) {
+    TextButton(onClick = onClick) { Text(label, style = SnapType.button, color = color) }
+}
+
+/** A 44dp tap target with one icon (back, close, menu). */
+@Composable
+fun IconTap(icon: ImageVector, description: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, contentDescription = description, tint = SnapColors.ink)
+    }
 }
 
 @Composable
 fun Field(label: String, value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, placeholder: String? = null, large: Boolean = false) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = SnapType.label)
+        Text(label, style = SnapType.meta)
         OutlinedTextField(
             value = value,
             onValueChange = onChange,
@@ -132,25 +158,28 @@ fun Field(label: String, value: String, onChange: (String) -> Unit, modifier: Mo
             textStyle = if (large) SnapType.title else SnapType.body,
             placeholder = placeholder?.let { { Text(it, style = SnapType.meta) } },
             singleLine = true,
-            shape = RoundedCornerShape(12.dp),
+            shape = SnapShapes.card,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = SnapColors.green, unfocusedBorderColor = SnapColors.line,
-                focusedContainerColor = SnapColors.surface, unfocusedContainerColor = SnapColors.surface,
+                focusedBorderColor = SnapColors.ink,
+                unfocusedBorderColor = Color.Transparent,
+                focusedContainerColor = SnapColors.bg,
+                unfocusedContainerColor = SnapColors.bg,
+                cursorColor = SnapColors.ink,
             ),
         )
     }
 }
 
-/** Amber note with an optional action, for things the user should fix. */
+/** Something the user should fix: a white card with an ink bar on the left and an optional text action. */
 @Composable
-fun Notice(text: String, action: Pair<String, () -> Unit>? = null) {
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(SnapColors.amberSoft).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(text, style = SnapType.body.copy(color = SnapColors.amber))
-        action?.let { (label, onClick) ->
-            Text(label, style = SnapType.body.copy(fontWeight = FontWeight.Bold, color = SnapColors.amber), modifier = Modifier.clickable(onClick = onClick))
+fun Notice(text: String, action: Pair<String, () -> Unit>? = null, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(SnapShapes.card).background(SnapColors.surface)) {
+        Box(Modifier.width(4.dp).fillMaxHeight().background(SnapColors.ink))
+        Column(Modifier.padding(SnapSpace.card), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(text, style = SnapType.body)
+            action?.let { (label, onClick) ->
+                Text(label, style = SnapType.button.copy(color = SnapColors.ink), modifier = Modifier.clickable(onClick = onClick).padding(vertical = 4.dp))
+            }
         }
     }
 }
@@ -158,52 +187,89 @@ fun Notice(text: String, action: Pair<String, () -> Unit>? = null) {
 @Composable
 fun <T> Segmented(options: List<T>, value: T, onChange: (T) -> Unit, format: (T) -> String, modifier: Modifier = Modifier) {
     Row(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(SnapColors.surface).border(1.dp, SnapColors.line, RoundedCornerShape(12.dp)).padding(3.dp),
+        modifier.fillMaxWidth().clip(SnapShapes.card).background(SnapColors.line).padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         for (o in options) {
             val on = o == value
             Box(
-                Modifier.weight(1f).clip(RoundedCornerShape(9.dp)).background(if (on) SnapColors.ink else Color.Transparent)
-                    .clickable { onChange(o) }.padding(vertical = 9.dp),
+                Modifier.weight(1f).clip(SnapShapes.small).background(if (on) SnapColors.surface else Color.Transparent)
+                    .clickable { onChange(o) }.padding(vertical = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(format(o), fontFamily = SnapFonts.body, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, color = if (on) SnapColors.surface else SnapColors.ink)
+                Text(format(o), style = SnapType.label.copy(color = if (on) SnapColors.ink else SnapColors.ink2, fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold))
             }
         }
     }
 }
 
-/** White card with a hairline border. */
+/** White card on the grey background: no border or shadow unless asked. */
 @Composable
-fun Card(modifier: Modifier = Modifier, border: BorderStroke = BorderStroke(1.dp, SnapColors.line), content: @Composable () -> Unit) {
-    Box(modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(SnapColors.surface).border(border, RoundedCornerShape(16.dp))) { content() }
+fun Card(modifier: Modifier = Modifier, border: BorderStroke? = null, content: @Composable () -> Unit) {
+    Box(
+        modifier.fillMaxWidth().clip(SnapShapes.card).background(SnapColors.surface)
+            .then(if (border != null) Modifier.border(border, SnapShapes.card) else Modifier),
+    ) { content() }
 }
 
-/** The yellow "near right now" band on top of a card. */
+/** Lime chip: "you are near this right now". The one meaning lime has. */
 @Composable
-fun NearBand(text: String) {
+fun NearChip(text: String = "지금 근처", modifier: Modifier = Modifier) {
     Text(
         text,
-        fontFamily = SnapFonts.display,
-        color = SnapColors.ink,
-        modifier = Modifier.fillMaxWidth().background(SnapColors.highlight).padding(horizontal = 16.dp, vertical = 8.dp),
+        style = SnapType.meta.copy(fontWeight = FontWeight.Bold, color = SnapColors.limeInk),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier.clip(SnapShapes.small).background(SnapColors.lime).padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+}
+
+/** A white chip floating on the map (logo, "알림 12곳", back to the list). */
+@Composable
+fun FloatingChip(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, content: @Composable RowScope.() -> Unit) {
+    Row(
+        modifier.shadow(4.dp, SnapShapes.card).clip(SnapShapes.card).background(SnapColors.surface)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .heightIn(min = 40.dp).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
     )
 }
 
 @Composable
-fun Fact(text: String) {
-    Text(
-        text,
-        style = SnapType.meta.copy(fontSize = SnapType.meta.fontSize * 0.92f),
-        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(SnapColors.paper).padding(horizontal = 8.dp, vertical = 2.dp),
+fun SheetHandle() {
+    Box(Modifier.padding(vertical = 8.dp).size(32.dp, 4.dp).clip(RoundedCornerShape(2.dp)).background(SnapColors.muted.copy(alpha = 0.35f)))
+}
+
+/** A small line, then the screen's sentence in display type. */
+@Composable
+fun BigTitle(kicker: String?, title: String, modifier: Modifier = Modifier) = BigTitle(kicker, AnnotatedString(title), modifier)
+
+@Composable
+fun BigTitle(kicker: String?, title: AnnotatedString, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        kicker?.let { Text(it, style = SnapType.label) }
+        Text(title, style = SnapType.display)
+    }
+}
+
+@Composable
+fun ConfirmDelete(title: String, body: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, style = SnapType.title) },
+        text = { Text(body, style = SnapType.body) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("삭제", style = SnapType.button, color = SnapColors.danger) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소", style = SnapType.button, color = SnapColors.ink2) } },
+        containerColor = SnapColors.surface,
+        shape = SnapShapes.card,
     )
 }
 
 @Composable
 fun MapUnavailable(reason: String) {
     Column(
-        Modifier.fillMaxSize().background(SnapColors.greenSoft).padding(24.dp),
+        Modifier.fillMaxSize().background(SnapColors.bg).padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -218,21 +284,21 @@ fun MapUnavailable(reason: String) {
 fun SlotMeter(total: Int, parts: List<Triple<String, Int, Color>>) {
     val used = parts.sumOf { it.second }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(SnapColors.surface), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             parts.filter { it.second > 0 }.forEach { (_, n, tone) -> Box(Modifier.weight(n.toFloat()).fillMaxSize().background(tone)) }
-            if (total - used > 0) Box(Modifier.weight((total - used).toFloat()).fillMaxSize().background(SnapColors.paper))
+            if (total - used > 0) Box(Modifier.weight((total - used).toFloat()).fillMaxSize().background(SnapColors.line))
         }
         parts.forEach { (label, n, tone) -> MeterRow(label, "${n}칸", tone) }
-        MeterRow("비어 있음", "${maxOf(total - used, 0)}칸", SnapColors.paper, muted = true)
+        MeterRow("비어 있음", "${maxOf(total - used, 0)}칸", SnapColors.line, muted = true)
     }
 }
 
 @Composable
 private fun MeterRow(label: String, count: String, tone: Color, muted: Boolean = false) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(tone).border(if (muted) 1.dp else 0.dp, SnapColors.line, RoundedCornerShape(3.dp)))
+        Box(Modifier.size(10.dp).clip(RoundedCornerShape(3.dp)).background(tone))
         Text(label, style = SnapType.body.copy(color = if (muted) SnapColors.muted else SnapColors.ink), modifier = Modifier.weight(1f))
-        Text(count, style = SnapType.distance.copy(color = if (muted) SnapColors.muted else SnapColors.ink))
+        Text(count, style = SnapType.label.copy(color = if (muted) SnapColors.muted else SnapColors.ink, fontWeight = FontWeight.Bold))
     }
 }
 

@@ -76,7 +76,7 @@ data class Batch(
 fun batchSummary(b: Batch): String {
     val parts = listOfNotNull(
         "장소 ${b.places}곳".takeIf { b.places > 0 },
-        "쿠폰 ${b.coupons}장".takeIf { b.coupons > 0 },
+        "기프티콘 ${b.coupons}장".takeIf { b.coupons > 0 },
     )
     return if (parts.isEmpty()) "저장한 것이 없어요" else parts.joinToString(", ") + "을 저장했어요"
 }
@@ -133,7 +133,7 @@ fun buildCoupon(d: Draft, id: String, now: Long): Coupon? {
     return Coupon(
         id = id,
         brand = brand,
-        benefit = d.benefit.trim().ifEmpty { "쿠폰" },
+        benefit = d.benefit.trim().ifEmpty { "기프티콘" },
         expiresAt = d.endDate.trim().takeIf { isDate(it) },
         imageUri = d.imageUri.ifEmpty { null },
         createdAt = now,
