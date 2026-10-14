@@ -15,7 +15,12 @@ import com.capstone.snapspot.net.TmapWalk
 import com.capstone.snapspot.notify.AlertService
 import com.capstone.snapspot.notify.AndroidNotifier
 import com.capstone.snapspot.notify.ensureChannel
+import com.capstone.snapspot.ui.widget.refreshWidgetsOn
+import com.capstone.snapspot.ui.widget.updateAllWidgets
 import com.kakao.vectormap.KakaoMapSdk
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -52,5 +57,8 @@ class SnapSpotApp : Application() {
         ensureChannel(this)
         mapReady = BuildConfig.KAKAO_NATIVE_KEY.isNotEmpty() &&
             runCatching { KakaoMapSdk.init(this, BuildConfig.KAKAO_NATIVE_KEY) }.isSuccess
+        // Every write to gifticons or the alert window passes through these flows, so the widgets follow them.
+        CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            .refreshWidgetsOn(container.repo.coupons, container.repo.window) { updateAllWidgets(this@SnapSpotApp) }
     }
 }

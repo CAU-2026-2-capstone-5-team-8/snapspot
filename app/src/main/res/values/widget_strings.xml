@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_expiring_description">곧 만료되는 기프티콘을 보여 줘요</string>
+    <string name="widget_nearby_description">근처에 지점이 있는 기프티콘을 보여 줘요</string>
+</resources>
