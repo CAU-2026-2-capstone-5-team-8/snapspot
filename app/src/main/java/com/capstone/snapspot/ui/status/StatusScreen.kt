@@ -89,7 +89,7 @@ fun StatusScreen(vm: HomeViewModel, onBack: () -> Unit, onAskPermissions: () -> 
 
             if (!(perms.notif && perms.fg && perms.bg)) Notice("앱을 닫아도 알림을 받으려면 알림 권한과 위치 \"항상 허용\"이 필요해요.", "권한 설정하기" to onAskPermissions)
             if (perms.bg && !perms.net) Notice("휴대폰의 \"Google 위치 정확도\"가 꺼져 있어서 앱을 닫으면 알림이 오지 않아요.", "위치 정확도 켜기" to onLocationSettings)
-            sync?.error?.takeIf { perms.bg }?.let { Notice("지오펜스를 등록하지 못했어요: $it") }
+            sync?.error?.takeIf { perms.bg }?.let { Notice("알림 장소를 등록하지 못했어요: $it") }
 
             Card {
                 Column(Modifier.padding(SnapSpace.card), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -127,7 +127,7 @@ fun StatusScreen(vm: HomeViewModel, onBack: () -> Unit, onAskPermissions: () -> 
                         Text("아직 고른 적이 없어요. 위치 권한을 허용하면 바로 시작해요.", style = SnapType.meta)
                     } else {
                         FactRow("시각", ago(w.at))
-                        FactRow("카카오 지점 검색", if (w.requests == 0) "저장해 둔 결과 사용" else "${w.requests}회")
+                        FactRow("카카오 검색", kakaoSearchLabel(w.requests))
                         FactRow("기준 위치", if (w.here != null) "확인됨" else "아직 모름")
                     }
                 }
@@ -143,3 +143,6 @@ private fun FactRow(label: String, value: String) {
         Text(value, style = SnapType.body.copy(fontWeight = FontWeight.Bold))
     }
 }
+
+/** Card 3 says whether Kakao was searched, not how many requests it took. */
+internal fun kakaoSearchLabel(requests: Int) = if (requests == 0) "저장해 둔 결과 사용" else "새로 검색했어요"

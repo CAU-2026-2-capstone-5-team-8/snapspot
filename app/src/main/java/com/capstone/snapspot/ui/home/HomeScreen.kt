@@ -1,5 +1,6 @@
 package com.capstone.snapspot.ui.home
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -44,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -87,8 +90,13 @@ import com.capstone.snapspot.ui.theme.SnapColors
 import com.capstone.snapspot.ui.theme.SnapShapes
 import com.capstone.snapspot.ui.theme.SnapSpace
 import com.capstone.snapspot.ui.theme.SnapType
+import kotlinx.coroutines.launch
 
 private enum class Tab { PLACES, COUPONS }
+
+/** Extra bottom padding for the sheet list while collapsed: the part of the list that sits below the visible peek. */
+internal fun collapsedListPadding(sheetHeight: androidx.compose.ui.unit.Dp, peek: androidx.compose.ui.unit.Dp, collapsed: Boolean) =
+    if (collapsed) (sheetHeight - peek).coerceAtLeast(0.dp) else 0.dp
 
 private fun initial(s: String) = s.trim().firstOrNull()?.toString() ?: "?"
 
@@ -138,7 +146,13 @@ fun HomeScreen(
     val now = System.currentTimeMillis()
     val near = nearPlaces(places, here, now)
     val header = listHeader(perms.alertsOn, bundleItems.isNotEmpty())
+    val scope = rememberCoroutineScope()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+    // Back closes an open route instead of leaving the app.
+    BackHandler(enabled = open != null) { open?.let { vm.toggleBundle(it.bundle.id) } }
+    // Row taps and bundle opens move the map: collapse the sheet so the result is visible.
+    val showMap: () -> Unit = { scope.launch { sheet.bottomSheetState.partialExpand() } }
 
     // Tapping a pin scrolls the list to that row.
     LaunchedEffect(selected, tab, open, header) {
@@ -182,7 +196,11 @@ fun HomeScreen(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxWidth().height(sheetHeight),
-                    contentPadding = PaddingValues(start = SnapSpace.gutter, end = SnapSpace.gutter, bottom = 96.dp + navBottom),
+                    // Collapsed, only `peek` of the 88%-tall list shows: pad the rest so the last rows can scroll to the top.
+                    contentPadding = PaddingValues(
+                        start = SnapSpace.gutter, end = SnapSpace.gutter,
+                        bottom = 96.dp + navBottom + collapsedListPadding(sheetHeight, peek, sheet.bottomSheetState.targetValue == SheetValue.PartiallyExpanded),
+                    ),
                 ) {
                     if (open == null) {
                         // Header rows: keep in step with listHeader().
@@ -212,7 +230,7 @@ fun HomeScreen(
                         if (bundleItems.isNotEmpty()) item(key = "bundles") {
                             LazyRow(Modifier.padding(bottom = SnapSpace.gap), horizontalArrangement = Arrangement.spacedBy(SnapSpace.gap)) {
                                 items(bundleItems, key = { it.bundle.id }) { b ->
-                                    BundleCard(b, walks[b.walkKey]?.minutes ?: b.minutes, Modifier.fillParentMaxWidth(if (bundleItems.size == 1) 1f else 0.86f)) { vm.toggleBundle(b.bundle.id) }
+                                    BundleCard(b, walks[b.walkKey]?.minutes ?: b.minutes, Modifier.fillParentMaxWidth(if (bundleItems.size == 1) 1f else 0.86f)) { vm.toggleBundle(b.bundle.id); showMap() }
                                 }
                             }
                         }
@@ -234,7 +252,7 @@ fun HomeScreen(
                                 PlaceRow(
                                     p, here?.let { distanceMeters(it, Coords(p.latitude, p.longitude)) }, near = p.id in near,
                                     ended = placeEnded(p, now), selected = p.id == selected, shape = groupShape(i, places.size),
-                                    onClick = { vm.focusOn(p.id) }, onLongClick = { deletingPlace = p },
+                                    onClick = { vm.focusOn(p.id); showMap() }, onLongClick = { deletingPlace = p },
                                 )
                             }
                         } else {
@@ -269,7 +287,7 @@ fun HomeScreen(
                             val p = places.firstOrNull { it.id == st.placeId }
                             StopRow(
                                 i + 1, st, p, near = p != null && p.id in near, shape = groupShape(i, stops.size),
-                                onClick = p?.let { { vm.focusOn(it.id) } },
+                                onClick = p?.let { { vm.focusOn(it.id); showMap() } },
                             )
                         }
                         item(key = "bundle-preview") {
