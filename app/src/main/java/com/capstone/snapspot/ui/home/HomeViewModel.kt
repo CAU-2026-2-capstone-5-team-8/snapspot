@@ -203,12 +203,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleBundle(id: String) {
+        // The map fits the opened bundle's route into view by itself (SpotMap).
         _openBundle.value = if (_openBundle.value == id) null else id
-        val item = bundles.value.firstOrNull { it.bundle.id == id } ?: return
-        if (_openBundle.value == id) {
-            val span = item.bundle.places.maxOf { distanceMeters(item.bundle.center, Coords(it.latitude, it.longitude)) }
-            _focus.value = MapFocus(item.bundle.center, System.nanoTime(), if (span < 400) 16 else if (span < 900) 15 else 14)
-        }
     }
 
     /** From a bundle notification: open the bundle the place is in, or just the place if the bundle is gone. */
