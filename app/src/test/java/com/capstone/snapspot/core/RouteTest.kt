@@ -59,6 +59,19 @@ class RouteTest {
     }
 
     @Test
+    fun `with four coupon brands the heuristic stays close to exact`() {
+        // 7 places + 4 brands of 5–8 branches each: the case where moving a stop must also re-pick its branch.
+        val gaps = (1..20).map { seed ->
+            val r = Random(seed)
+            val st = List(7) { listOf(near(r)) } + List(4) { List(5 + r.nextInt(4)) { near(r) } }
+            val start = if (seed % 2 == 0) origin else null
+            heuristicRoute(st, start).meters / exactRoute(st, start).meters - 1
+        }
+        assertTrue(gaps.average() < 0.02, "average gap ${gaps.average()}")
+        assertTrue(gaps.max() < 0.10, "worst gap ${gaps.max()}")
+    }
+
+    @Test
     fun `each improvement step only shortens the route`() {
         for (seed in 1..25) {
             val st = stops(12 + seed % 9, seed, maxOptions = 3)
