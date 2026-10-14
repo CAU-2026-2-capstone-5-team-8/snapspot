@@ -264,7 +264,7 @@ fun HomeScreen(
                     } else {
                         item(key = "bundle-head") {
                             Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp, bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
-                                BigTitle("가 볼 곳 ${open.bundle.places.size}곳", "걸어서 ${walks[open.walkKey]?.minutes ?: open.minutes}분", Modifier.weight(1f))
+                                BigTitle("가 볼 곳 ${open.route.order.size}곳", "걸어서 ${walks[open.walkKey]?.minutes ?: open.minutes}분", Modifier.weight(1f))
                                 Text("기프티콘 포함", style = SnapType.label)
                                 Gap(6.dp)
                                 Switch(
@@ -486,7 +486,7 @@ private fun BundleCard(b: BundleItem, minutes: Int, modifier: Modifier, onOpen: 
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(bundleTitle(b.name), style = SnapType.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("가 볼 곳 ${b.bundle.places.size}곳 · 걸어서 ${minutes}분", style = SnapType.meta, maxLines = 1)
+            Text("가 볼 곳 ${b.route.order.size}곳 · 걸어서 ${minutes}분", style = SnapType.meta, maxLines = 1)
         }
         Text(
             "동선 보기",
