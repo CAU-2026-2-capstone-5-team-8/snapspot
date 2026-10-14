@@ -9,13 +9,15 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.ExistingWorkPolicy
 import com.capstone.snapspot.SnapSpotApp
 import com.capstone.snapspot.core.Bundle
+import com.capstone.snapspot.core.Coords
 import com.capstone.snapspot.core.CouponFetch
 import com.capstone.snapspot.core.CouponStop
-import com.capstone.snapspot.core.Coords
 import com.capstone.snapspot.core.REFRESH_ID
 import com.capstone.snapspot.core.RouteMemo
 import com.capstone.snapspot.core.RouteResult
 import com.capstone.snapspot.core.Stop
+import com.capstone.snapspot.core.WalkPath
+import com.capstone.snapspot.core.branchSpotId
 import com.capstone.snapspot.core.brandGroups
 import com.capstone.snapspot.core.brandKey
 import com.capstone.snapspot.core.bundles
@@ -25,13 +27,14 @@ import com.capstone.snapspot.core.fallbackBundleName
 import com.capstone.snapspot.core.followBundles
 import com.capstone.snapspot.core.isActive
 import com.capstone.snapspot.core.isUrgent
+import com.capstone.snapspot.core.model.Branch
 import com.capstone.snapspot.core.model.Coupon
 import com.capstone.snapspot.core.model.Place
 import com.capstone.snapspot.core.nearbyBranches
 import com.capstone.snapspot.core.nearbyCouponStops
+import com.capstone.snapspot.core.needsMapSearch
 import com.capstone.snapspot.core.shortestRoute
 import com.capstone.snapspot.core.stopsOf
-import com.capstone.snapspot.core.WalkPath
 import com.capstone.snapspot.core.walkKey
 import com.capstone.snapspot.core.walkMinutes
 import com.capstone.snapspot.core.walkPath
@@ -41,7 +44,9 @@ import com.capstone.snapspot.geofence.hasBackgroundLocation
 import com.capstone.snapspot.geofence.hasFineLocation
 import com.capstone.snapspot.notify.notificationsAllowed
 import com.capstone.snapspot.ui.map.MapFocus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -50,7 +55,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -90,6 +94,23 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     val focus: StateFlow<MapFocus?> = _focus.asStateFlow()
     private val _selected = MutableStateFlow<String?>(null)
     val selected: StateFlow<String?> = _selected.asStateFlow()
+
+    /** The map follows the user until a hand moves it, a pin or row is focused, or a route opens. */
+    private val _following = MutableStateFlow(true)
+    val following: StateFlow<Boolean> = _following.asStateFlow()
+    /** Where the map's camera last came to rest, and its zoom. */
+    private val _camera = MutableStateFlow<Pair<Coords, Int>?>(null)
+    val camera: StateFlow<Pair<Coords, Int>?> = _camera.asStateFlow()
+
+    /**
+     * Gifticon branches the map looked up around [mapSearchAt] (by id `b|brand|kakaoId`), apart from the alert plan,
+     * which only covers the user's surroundings. Uses the same 6-hour branch cache.
+     */
+    private val _mapBranches = MutableStateFlow<Map<String, Branch>>(emptyMap())
+    val mapBranches: StateFlow<Map<String, Branch>> = _mapBranches.asStateFlow()
+    private val _mapSearchAt = MutableStateFlow<Coords?>(null)
+    val mapSearchAt: StateFlow<Coords?> = _mapSearchAt.asStateFlow()
+    private var mapSearch: Job? = null
 
     val places: StateFlow<List<Place>> = combine(c.repo.places, here) { list, at ->
         if (at == null) list else list.sortedBy { distanceMeters(at, Coords(it.latitude, it.longitude)) }
@@ -153,10 +174,17 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         refreshPerms()
-        // The map starts wherever it can; once the first position arrives, go there unless something else was focused.
+        // While following, the map keeps the user in view and searches again after moving 1.5km.
         viewModelScope.launch {
-            val at = here.filterNotNull().first()
-            if (_focus.value == null) _focus.value = MapFocus(at, System.nanoTime(), 15)
+            combine(here, _following) { at, on -> at.takeIf { on } }.filterNotNull().collect { at ->
+                _focus.value = MapFocus(at, System.nanoTime(), zoom = null)
+                if (needsMapSearch(_mapSearchAt.value, at)) searchMap(at)
+            }
+        }
+        // A gifticon added, used or deleted changes which brands the map shows: search the same spot again.
+        viewModelScope.launch {
+            c.repo.coupons.map { list -> list.filter { isActive(it, System.currentTimeMillis()) }.map { brandKey(it.brand) }.toSet() }
+                .distinctUntilChanged().collect { _mapSearchAt.value?.let(::searchMap) }
         }
         // Saved data or the first position changes what the window registers.
         viewModelScope.launch {
@@ -203,6 +231,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleBundle(id: String) {
+        _following.value = false
         // The map fits the opened bundle's route into view by itself (SpotMap).
         _openBundle.value = if (_openBundle.value == id) null else id
     }
@@ -283,15 +312,44 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun focusOn(id: String) {
         _selected.value = id
+        _following.value = false
         val p = c.repo.places.value.firstOrNull { it.id == id }
-        val b = window.value?.branches?.get(id)
-        val at = p?.let { Coords(it.latitude, it.longitude) } ?: b?.let { Coords(it.latitude, it.longitude) } ?: return
+        val b = window.value?.branches?.get(id)?.let { Coords(it.latitude, it.longitude) }
+            ?: _mapBranches.value[id]?.let { Coords(it.latitude, it.longitude) }
+        val at = p?.let { Coords(it.latitude, it.longitude) } ?: b ?: return
         _focus.value = MapFocus(at, System.nanoTime())
     }
 
     fun focusHere() {
         _selected.value = null
+        _following.value = true
         here.value?.let { _focus.value = MapFocus(it, System.nanoTime(), 15) }
+    }
+
+    fun onCameraRest(at: Coords, zoom: Int, byHand: Boolean) {
+        _camera.value = at to zoom
+        if (byHand) _following.value = false
+    }
+
+    /** Looks up the branches of every brand with a usable gifticon around `at`, for the map. */
+    fun searchMap(at: Coords) {
+        _mapSearchAt.value = at
+        mapSearch?.cancel()
+        mapSearch = viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val found = HashMap<String, Branch>()
+            for (cp in c.repo.coupons.value.filter { isActive(it, now) }.distinctBy { brandKey(it.brand) }) {
+                val branches = try {
+                    nearbyBranches(cp.brand, at, c.kakao, c.branchCache, now).branches
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                branches.forEach { found[branchSpotId(brandKey(cp.brand), it.kakaoId)] = it }
+            }
+            _mapBranches.value = found
+        }
     }
 
     fun deletePlace(p: Place) = viewModelScope.launch { c.repo.removePlace(p.id) }

@@ -33,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -56,6 +57,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -66,15 +68,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.capstone.snapspot.core.BRANCH_RADIUS_M
 import com.capstone.snapspot.core.Coords
+import com.capstone.snapspot.core.MAP_MIN_SEARCH_ZOOM
+import com.capstone.snapspot.core.URGENT_DAYS
 import com.capstone.snapspot.core.brandKey
 import com.capstone.snapspot.core.brandKeyOfRegion
+import com.capstone.snapspot.core.couponsForBrand
 import com.capstone.snapspot.core.dDay
 import com.capstone.snapspot.core.daysLeft
 import com.capstone.snapspot.core.distanceMeters
 import com.capstone.snapspot.core.formatDistance
+import com.capstone.snapspot.core.limitBranches
 import com.capstone.snapspot.core.model.Coupon
 import com.capstone.snapspot.core.model.Place
+import com.capstone.snapspot.core.needsMapSearch
+import com.capstone.snapspot.core.placeDaysLeft
 import com.capstone.snapspot.core.placeEnded
+import com.capstone.snapspot.core.untilLabel
 import com.capstone.snapspot.ui.components.BigTitle
 import com.capstone.snapspot.ui.components.ConfirmDelete
 import com.capstone.snapspot.ui.components.Dot
@@ -82,6 +91,8 @@ import com.capstone.snapspot.ui.components.FloatingChip
 import com.capstone.snapspot.ui.components.Gap
 import com.capstone.snapspot.ui.components.NearChip
 import com.capstone.snapspot.ui.components.Notice
+import com.capstone.snapspot.ui.components.PrimaryButton
+import com.capstone.snapspot.ui.components.SecondaryButton
 import com.capstone.snapspot.ui.components.Segmented
 import com.capstone.snapspot.ui.components.SheetHandle
 import com.capstone.snapspot.ui.components.Shot
@@ -140,10 +151,16 @@ fun HomeScreen(
     val openBundle by vm.openBundle.collectAsState()
     val couponsOn by vm.withCoupons.collectAsState()
     val walks by vm.walks.collectAsState()
+    val found by vm.mapBranches.collectAsState()
+    val following by vm.following.collectAsState()
+    val camera by vm.camera.collectAsState()
+    val searchAt by vm.mapSearchAt.collectAsState()
     val open = bundleItems.firstOrNull { it.bundle.id == openBundle }
     var tab by rememberSaveable { mutableStateOf(Tab.PLACES) }
     var deletingPlace by remember { mutableStateOf<Place?>(null) }
     var deletingCoupon by remember { mutableStateOf<Coupon?>(null) }
+    // The place whose card is up over the map, after its pin was tapped.
+    var info by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val sheet = rememberBottomSheetScaffoldState()
     val now = System.currentTimeMillis()
@@ -154,6 +171,7 @@ fun HomeScreen(
 
     // Back closes an open route instead of leaving the app.
     BackHandler(enabled = open != null) { open?.let { vm.toggleBundle(it.bundle.id) } }
+    BackHandler(enabled = info != null) { info = null }
     // Row taps and bundle opens move the map: collapse the sheet so the result is visible.
     val showMap: () -> Unit = { scope.launch { sheet.bottomSheetState.partialExpand() } }
 
@@ -171,7 +189,8 @@ fun HomeScreen(
     val numberOf = stops.mapIndexedNotNull { i, st -> st.placeId?.let { it to i + 1 } }.toMap()
     // Follows the streets once TMAP answers, straight lines until then.
     val walked = open?.let { walks[it.walkKey]?.line }
-    val mapPlaces = places.map {
+    // A place whose end date has passed stays in the list but leaves the map.
+    val mapPlaces = places.filter { !placeEnded(it, now) }.map {
         MapPlace(
             // Alert circles stay up while the route is still straight lines; once it follows the streets,
             // only the line and numbered stops show, since the circles would clutter it.
@@ -183,9 +202,15 @@ fun HomeScreen(
         else MapPlace("route-$i", st.at, 0.0, null, ended = false, selected = false, number = i + 1, couponStop = true, tone = tones[brandKey(st.brand.orEmpty())] ?: 0)
     }
     val routeLine = if (open == null) emptyList() else walked ?: open.line
-    val mapBranches = win?.branches.orEmpty().map { (id, b) ->
-        val at = Coords(b.latitude, b.longitude)
-        MapBranch(id, at, b.urgent, here?.let { distanceMeters(it, at) <= BRANCH_RADIUS_M } == true, tones[brandKeyOfRegion(id)] ?: 0)
+    // Gifticon branches: the alert plan's around the user plus what the map looked up where it was looking,
+    // drawn only near the user (while following) or the map's center, the nearest few of each brand.
+    val urgentBrands = coupons.filter { it.urgent }.map { brandKey(it.coupon.brand) }.toSet()
+    val branchPins: Map<String, Pair<Coords, Boolean>> =
+        found.mapValues { (id, b) -> Coords(b.latitude, b.longitude) to (brandKeyOfRegion(id) in urgentBrands) } +
+            win?.branches.orEmpty().mapValues { (_, b) -> Coords(b.latitude, b.longitude) to b.urgent }
+    val shown = limitBranches(branchPins.mapValues { it.value.first }, if (following) here else camera?.first ?: here)
+    val mapBranches = branchPins.filterKeys { it in shown }.map { (id, v) ->
+        MapBranch(id, v.first, v.second, here?.let { distanceMeters(it, v.first) <= BRANCH_RADIUS_M } == true, tones[brandKeyOfRegion(id)] ?: 0)
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(SnapColors.bg)) {
@@ -319,9 +344,20 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxSize(),
                     route = routeLine,
                     padBottom = peek,
+                    onCameraRest = vm::onCameraRest,
                     onPinClick = { id ->
-                        if (places.any { it.id == id }) tab = Tab.PLACES
-                        vm.focusOn(id)
+                        // A gifticon pin (a branch, or a coupon stop on the route) opens its brand's soonest-expiring gifticon.
+                        val brand = when {
+                            places.any { it.id == id } -> null
+                            id.startsWith("route-") -> stops.getOrNull(id.removePrefix("route-").toIntOrNull() ?: -1)?.brand?.let(::brandKey)
+                            else -> brandKeyOfRegion(id)
+                        }
+                        val gift = brand?.let { couponsForBrand(coupons.map { it.coupon }, it, now).firstOrNull() }
+                        when {
+                            gift != null -> onCoupon(gift.id)
+                            places.any { it.id == id } -> { tab = Tab.PLACES; vm.focusOn(id); info = id }
+                            else -> vm.focusOn(id)
+                        }
                     },
                 )
                 Row(
@@ -346,6 +382,20 @@ fun HomeScreen(
                         .shadow(4.dp, SnapShapes.card).clip(SnapShapes.card).background(SnapColors.surface).clickable { vm.focusHere() },
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Filled.MyLocation, contentDescription = "내 위치로", tint = SnapColors.ink, modifier = Modifier.size(20.dp)) }
+                // After moving the map by hand far from the last search: look up gifticon branches there.
+                val rest = camera
+                if (open == null && !following && rest != null && coupons.any { it.active }) {
+                    val chip = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 64.dp)
+                    if (rest.second < MAP_MIN_SEARCH_ZOOM) {
+                        FloatingChip(chip) { Text("지도를 확대하면 지점을 찾을 수 있어요", style = SnapType.label) }
+                    } else if (needsMapSearch(searchAt, rest.first)) {
+                        FloatingChip(chip, onClick = { vm.searchMap(rest.first) }) {
+                            Icon(Icons.Filled.Refresh, contentDescription = null, tint = SnapColors.ink, modifier = Modifier.size(16.dp))
+                            Gap(6.dp)
+                            Text("이 지역에서 다시 탐색", style = SnapType.label.copy(color = SnapColors.ink))
+                        }
+                    }
+                }
             }
         }
         if (open == null) {
@@ -355,6 +405,14 @@ fun HomeScreen(
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Filled.Add, contentDescription = "스크린샷 추가", tint = SnapColors.lime, modifier = Modifier.size(28.dp)) }
         }
+        places.firstOrNull { it.id == info }?.let { p ->
+            val bundle = bundleItems.firstOrNull { b -> b.bundle.places.any { it.id == p.id } }
+            PlaceCard(
+                p, now,
+                onRoute = bundle?.takeIf { it.bundle.id != openBundle }?.let { b -> { info = null; vm.toggleBundle(b.bundle.id); showMap() } },
+                onClose = { info = null },
+            )
+        }
     }
 
     deletingPlace?.let { p ->
@@ -362,6 +420,49 @@ fun HomeScreen(
     }
     deletingCoupon?.let { cp ->
         ConfirmDelete("${cp.brand} 기프티콘 삭제", "이 기프티콘의 지점 알림도 함께 꺼져요.", onConfirm = { vm.deleteCoupon(cp); deletingCoupon = null }, onDismiss = { deletingCoupon = null })
+    }
+}
+
+/** A place's card over the map: its screenshot, category, end date and note. Tapping outside closes it. */
+@Composable
+private fun PlaceCard(p: Place, now: Long, onRoute: (() -> Unit)?, onClose: () -> Unit) {
+    val uri = LocalUriHandler.current
+    val ended = placeEnded(p, now)
+    Box(
+        Modifier.fillMaxSize().background(SnapColors.ink.copy(alpha = 0.35f)).clickable(onClickLabel = "닫기", onClick = onClose),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().clip(SnapShapes.sheet).background(SnapColors.surface)
+                .clickable(enabled = false, onClick = {}).navigationBarsPadding().padding(SnapSpace.gutter),
+            verticalArrangement = Arrangement.spacedBy(SnapSpace.gutter),
+        ) {
+            Row {
+                Shot(p.imageUri, 72.dp, 96.dp, modifier = if (ended) Modifier.alpha(0.5f) else Modifier)
+                Gap(SnapSpace.card)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(p.name, style = SnapType.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (p.category.isNotBlank()) Text(p.category, style = SnapType.label)
+                    (if (ended) "운영 종료" else untilLabel(p.endDate))?.let { end ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(end, style = SnapType.body.copy(color = SnapColors.ink2))
+                            placeDaysLeft(p, now)?.let { d ->
+                                Gap(6.dp)
+                                Text(dDay(d).orEmpty(), style = SnapType.label.copy(color = if (d <= URGENT_DAYS) SnapColors.urgent else SnapColors.ink))
+                            }
+                        }
+                    }
+                    p.note.trim().ifEmpty { null }?.let {
+                        Text(it, style = SnapType.body.copy(fontSize = 14.sp, color = SnapColors.ink2), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(SnapSpace.gap)) {
+                p.placeUrl?.let { url -> SecondaryButton("카카오 상세", { runCatching { uri.openUri(url) } }, Modifier.weight(1f)) }
+                if (onRoute != null) PrimaryButton("동선 보기", onRoute, Modifier.weight(1f))
+                else SecondaryButton("닫기", onClose, Modifier.weight(1f))
+            }
+        }
     }
 }
 
