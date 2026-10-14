@@ -169,18 +169,20 @@ fun HomeScreen(
     // An open bundle numbers its stops in walking order; coupon stops are the branch the route picked.
     val stops = open?.let { routeStops(it) }.orEmpty()
     val numberOf = stops.mapIndexedNotNull { i, st -> st.placeId?.let { it to i + 1 } }.toMap()
+    // Follows the streets once TMAP answers, straight lines until then.
+    val walked = open?.let { walks[it.walkKey]?.line }
     val mapPlaces = places.map {
         MapPlace(
-            // An open route shows the line and numbered stops only: alert circles would clutter it.
-            it.id, Coords(it.latitude, it.longitude), if (open != null) 0.0 else it.radius.toDouble(), it.imageUri, placeEnded(it, now),
+            // Alert circles stay up while the route is still straight lines; once it follows the streets,
+            // only the line and numbered stops show, since the circles would clutter it.
+            it.id, Coords(it.latitude, it.longitude), if (walked != null) 0.0 else it.radius.toDouble(), it.imageUri, placeEnded(it, now),
             it.id == selected, numberOf[it.id], near = it.id in near,
         )
     } + stops.mapIndexedNotNull { i, st ->
         if (st.placeId != null) null
         else MapPlace("route-$i", st.at, 0.0, null, ended = false, selected = false, number = i + 1, couponStop = true, tone = tones[brandKey(st.brand.orEmpty())] ?: 0)
     }
-    // Follows the streets once TMAP answers, straight lines until then.
-    val routeLine = if (open == null) emptyList() else walks[open.walkKey]?.line ?: open.line
+    val routeLine = if (open == null) emptyList() else walked ?: open.line
     val mapBranches = win?.branches.orEmpty().map { (id, b) ->
         val at = Coords(b.latitude, b.longitude)
         MapBranch(id, at, b.urgent, here?.let { distanceMeters(it, at) <= BRANCH_RADIUS_M } == true, tones[brandKeyOfRegion(id)] ?: 0)
