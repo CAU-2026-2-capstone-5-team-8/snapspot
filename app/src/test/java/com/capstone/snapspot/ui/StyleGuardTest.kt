@@ -12,7 +12,6 @@ class StyleGuardTest {
     /** Files not moved to the refreshed design yet. Each task of the refresh removes its own; empty when done. */
     private val legacy = setOf(
         "ui/Nav.kt",
-        "ui/add/AddScreen.kt",
         "ui/coupon/CouponScreen.kt",
         "ui/status/StatusScreen.kt",
         "notify/AndroidNotifier.kt",
