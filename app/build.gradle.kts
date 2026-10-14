@@ -28,6 +28,7 @@ android {
         buildConfigField("String", "GEMINI_MODEL", key("GEMINI_MODEL", "gemini-3.5-flash-lite"))
         buildConfigField("String", "KAKAO_REST_KEY", key("KAKAO_REST_KEY"))
         buildConfigField("String", "KAKAO_NATIVE_KEY", key("KAKAO_NATIVE_KEY"))
+        buildConfigField("String", "TMAP_APP_KEY", key("TMAP_APP_KEY"))
         // Kakao Map ships ARM libraries only; x86_64 emulators run them through ARM translation.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
@@ -44,12 +45,12 @@ android {
         unitTests.isReturnDefaultValues = true
         unitTests.all {
             it.useJUnitPlatform()
-            // ./gradlew :app:testDebugUnitTest -Psim [-PsimWrite]: geofence strategy simulation (docs/simulation.md).
+            // ./gradlew :app:testDebugUnitTest -Psim [-PsimWrite]: refresh radius experiment + real-Seoul check (docs/refresh-radius.md).
             if (project.hasProperty("sim")) {
-                it.filter.includeTestsMatching("*SimulateWindow*")
+                it.filter.includeTestsMatching("*UniformBranches*")
                 it.systemProperty("sim.run", "true")
                 it.systemProperty("sim.write", project.hasProperty("simWrite").toString())
-                it.systemProperty("sim.out", rootProject.file("docs/simulation.md").absolutePath)
+                it.systemProperty("sim.out", rootProject.file("docs/refresh-radius.md").absolutePath)
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }
@@ -65,6 +66,8 @@ android {
             // ./gradlew :app:testDebugUnitTest -ProuteBench [-ProuteWrite]: route algorithm benchmark (docs/route.md).
             if (project.hasProperty("routeBench")) {
                 it.filter.includeTestsMatching("*RouteBench*")
+                // Held-Karp at n = 20 keeps about 250MB of tables.
+                it.maxHeapSize = "2g"
                 it.systemProperty("route.run", "true")
                 it.systemProperty("route.write", project.hasProperty("routeWrite").toString())
                 it.systemProperty("route.out", rootProject.file("docs/route.md").absolutePath)
