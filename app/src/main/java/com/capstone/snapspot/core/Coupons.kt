@@ -62,3 +62,20 @@ fun placeEnded(p: Place, now: Long): Boolean {
     val end = p.endDate?.let(::endOfDay) ?: return false
     return end < now
 }
+
+/** Whole days until a place's end date (0 = it ends today), or null without one or once it has passed. */
+fun placeDaysLeft(p: Place, now: Long): Int? {
+    val end = p.endDate?.let(::endOfDay) ?: return null
+    return Math.floorDiv(end - now, 86_400_000L).toInt().takeIf { it >= 0 }
+}
+
+/**
+ * The coupons the coupon screen swipes through from `current`: its brand's active coupons, soonest-expiring first.
+ * A used or expired coupon, and a brand's only coupon, are shown alone.
+ */
+fun swipeGroup(coupons: List<Coupon>, current: Coupon, now: Long): List<Coupon> {
+    if (!isActive(current, now)) return listOf(current)
+    val group = couponsForBrand(coupons, brandKey(current.brand), now)
+    // The open coupon belongs to its own group even when the list it came from is a moment behind.
+    return if (group.any { it.id == current.id }) group else listOf(current)
+}

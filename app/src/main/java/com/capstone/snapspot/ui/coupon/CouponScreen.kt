@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -27,6 +29,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.capstone.snapspot.core.BRANCH_RADIUS_M
@@ -38,9 +42,12 @@ import com.capstone.snapspot.core.distanceMeters
 import com.capstone.snapspot.core.formatDistance
 import com.capstone.snapspot.core.isActive
 import com.capstone.snapspot.core.isUrgent
+import com.capstone.snapspot.core.model.Coupon
+import com.capstone.snapspot.core.swipeGroup
 import com.capstone.snapspot.core.untilLabel
 import com.capstone.snapspot.ui.components.BigTitle
 import com.capstone.snapspot.ui.components.ConfirmDelete
+import com.capstone.snapspot.ui.components.Dot
 import com.capstone.snapspot.ui.components.Gap
 import com.capstone.snapspot.ui.components.IconTap
 import com.capstone.snapspot.ui.components.LargeShot
@@ -53,15 +60,43 @@ import com.capstone.snapspot.ui.theme.SnapShapes
 import com.capstone.snapspot.ui.theme.SnapSpace
 import com.capstone.snapspot.ui.theme.SnapType
 
-/** One coupon, sized for the counter: the screenshot (with its barcode) as large as the screen allows. */
+/**
+ * The coupon `id`. When its brand has other active coupons, a swipe left and right goes through them,
+ * soonest-expiring first, with dots above the header saying which one is open.
+ */
 @Composable
 fun CouponScreen(vm: HomeViewModel, id: String, onClose: () -> Unit) {
     val items by vm.coupons.collectAsState()
+    val all = items.map { it.coupon }
+    val current = all.firstOrNull { it.id == id }
+    // Settled when the screen opens, so marking one used does not reshuffle the pages under the finger.
+    val group = remember(id, current != null) { current?.let { swipeGroup(all, it, System.currentTimeMillis()) }.orEmpty() }
+    if (group.size < 2) {
+        CouponPage(vm, current, onClose)
+        return
+    }
+    val pager = rememberPagerState(initialPage = group.indexOfFirst { it.id == id }.coerceAtLeast(0)) { group.size }
+    Box(Modifier.fillMaxSize().background(SnapColors.surface)) {
+        HorizontalPager(pager, Modifier.fillMaxSize(), key = { group[it].id }) { page ->
+            CouponPage(vm, all.firstOrNull { it.id == group[page].id } ?: group[page], onClose)
+        }
+        val position = "${group.size}장 중 ${pager.currentPage + 1}번째"
+        Row(
+            Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 4.dp).clearAndSetSemantics { contentDescription = position },
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            repeat(group.size) { i -> Dot(if (i == pager.currentPage) SnapColors.ink else SnapColors.line, 6.dp) }
+        }
+    }
+}
+
+/** One coupon, sized for the counter: the screenshot (with its barcode) as large as the screen allows. */
+@Composable
+private fun CouponPage(vm: HomeViewModel, c: Coupon?, onClose: () -> Unit) {
     val win by vm.window.collectAsState()
     val here by vm.here.collectAsState()
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
-    val c = items.firstOrNull { it.coupon.id == id }?.coupon
     val now = System.currentTimeMillis()
     val active = c != null && isActive(c, now)
     val branches: List<Pair<String, Double>> = if (c == null) emptyList() else here?.let { at ->

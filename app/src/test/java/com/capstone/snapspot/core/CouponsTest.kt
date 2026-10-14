@@ -80,4 +80,39 @@ class CouponsTest {
         assertFalse(isDate("2026-1-5"))
         assertFalse(isDate(null))
     }
+    @Test
+    fun `swipeGroup is the brand's active coupons, soonest first, with the open one in it`() {
+        val list = listOf(
+            coupon(id = "late", expiresAt = "2026-12-01"),
+            coupon(id = "soon", expiresAt = "2026-10-20"),
+            coupon(id = "other", brand = "올리브영"),
+            coupon(id = "used", usedAt = 1),
+        )
+        assertEquals(listOf("soon", "late"), swipeGroup(list, list[0], NOW).map { it.id })
+    }
+
+    @Test
+    fun `swipeGroup leaves a used, expired or only coupon alone`() {
+        val used = coupon(id = "used", usedAt = 1)
+        val gone = coupon(id = "gone", expiresAt = "2026-10-01")
+        val only = coupon(id = "only", brand = "올리브영")
+        val list = listOf(used, gone, only, coupon(id = "a"), coupon(id = "b"))
+        assertEquals(listOf("used"), swipeGroup(list, used, NOW).map { it.id })
+        assertEquals(listOf("gone"), swipeGroup(list, gone, NOW).map { it.id })
+        assertEquals(listOf("only"), swipeGroup(list, only, NOW).map { it.id })
+    }
+
+    @Test
+    fun `swipeGroup keeps the open coupon when the list has not caught up with it`() {
+        val fresh = coupon(id = "fresh")
+        assertEquals(listOf("fresh"), swipeGroup(listOf(coupon(id = "a")), fresh, NOW).map { it.id })
+    }
+
+    @Test
+    fun `placeDaysLeft counts to the end date, 0 on the last day, null once it passed or without one`() {
+        assertEquals(21, placeDaysLeft(place(endDate = "2026-10-31"), NOW))
+        assertEquals(0, placeDaysLeft(place(endDate = "2026-10-10"), NOW))
+        assertNull(placeDaysLeft(place(endDate = "2026-10-09"), NOW))
+        assertNull(placeDaysLeft(place(), NOW))
+    }
 }
