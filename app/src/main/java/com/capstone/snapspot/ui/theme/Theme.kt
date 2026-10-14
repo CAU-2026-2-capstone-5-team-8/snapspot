@@ -34,6 +34,12 @@ object SnapColors {
     val danger = Color(0xFFC9252D)
     /** Coupons that end within 3 days. */
     val urgent = Color(0xFFC2410C)
+    /**
+     * One color per gifticon brand on the map (gift pins, route squares, route numbers), in the order the brands were
+     * first saved. White icons sit on them, so each is at least 3:1 against white; none is close to lime, urgent orange
+     * or the user's blue.
+     */
+    val brandTones = listOf(Color(0xFF7C3AED), Color(0xFF0F766E), Color(0xFFDB2777), Color(0xFFA16207), Color(0xFF4338CA), Color(0xFF475569))
 
 }
 

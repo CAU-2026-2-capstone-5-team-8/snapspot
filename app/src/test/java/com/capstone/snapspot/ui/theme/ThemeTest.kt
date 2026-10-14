@@ -46,6 +46,11 @@ class ThemeTest {
     }
 
     @Test
+    fun `white gift icons and numbers read on every brand color`() {
+        SnapColors.brandTones.forEachIndexed { i, c -> assertContrast(SnapColors.surface, c, 3.0, "white on brand tone $i") }
+    }
+
+    @Test
     fun `map marks stand out from white`() {
         assertContrast(SnapColors.limeDeep, SnapColors.surface, 3.0, "limeDeep")
         assertContrast(SnapColors.me, SnapColors.surface, 3.0, "me")

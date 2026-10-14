@@ -92,16 +92,19 @@ fun Shot(
     }
 }
 
-/** Just the picture of a screenshot at full width, as tall as the picture is (clamped to `minHeight..maxHeight`). */
+/**
+ * Just the picture of a screenshot at full width, as tall as the picture is (clamped to `minHeight..maxHeight`).
+ * With `whole`, the entire screenshot instead, fitted inside `maxHeight`.
+ */
 @Composable
-fun PhotoShot(uri: String?, minHeight: Dp, maxHeight: Dp, modifier: Modifier = Modifier) {
+fun PhotoShot(uri: String?, minHeight: Dp, maxHeight: Dp, modifier: Modifier = Modifier, whole: Boolean = false) {
     val ctx = LocalContext.current
-    val image by produceState<ImageBitmap?>(null, uri) {
+    val image by produceState<ImageBitmap?>(null, uri, whole) {
         value = if (uri == null) null else withContext(Dispatchers.IO) {
             runCatching {
                 val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
                 ctx.contentResolver.openInputStream(Uri.parse(uri)).use { BitmapFactory.decodeStream(it, null, opts) }
-                    ?.let { photoOnly(it) }?.asImageBitmap()
+                    ?.let { if (whole) it else photoOnly(it) }?.asImageBitmap()
             }.getOrNull()
         }
     }
@@ -109,7 +112,7 @@ fun PhotoShot(uri: String?, minHeight: Dp, maxHeight: Dp, modifier: Modifier = M
         val img = image
         val h = if (img == null) minHeight else (maxWidth * (img.height.toFloat() / img.width)).coerceIn(minHeight, maxHeight)
         Box(Modifier.fillMaxWidth().height(h).background(SnapColors.line)) {
-            img?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+            img?.let { Image(it, contentDescription = null, contentScale = if (whole) ContentScale.Fit else ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
         }
     }
 }

@@ -82,10 +82,12 @@ data class MapPlace(
     val number: Int? = null,
     val near: Boolean = false,
     val couponStop: Boolean = false,
+    /** A coupon stop's brand slot ([brandTone]). */
+    val tone: Int = 0,
 )
 
-/** A registered coupon branch: a small square with a gift icon, no radius. */
-data class MapBranch(val id: String, val at: Coords, val urgent: Boolean, val near: Boolean)
+/** A registered coupon branch: a small square with a gift icon in its brand's color ([brandTone]), no radius. */
+data class MapBranch(val id: String, val at: Coords, val urgent: Boolean, val near: Boolean, val tone: Int = 0)
 
 /** Where the camera should go; `seq` changes for every request so the same spot can be re-focused. */
 data class MapFocus(val at: Coords, val seq: Long, val zoom: Int = 16)

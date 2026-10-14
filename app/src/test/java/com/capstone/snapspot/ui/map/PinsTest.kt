@@ -52,25 +52,37 @@ class PinsTest {
     }
 
     @Test
-    fun `coupon stops are white squares with an ink number`() {
-        val s = placePin(place(number = 3, couponStop = true))
+    fun `coupon stops are squares in their brand's color with a white number`() {
+        val s = placePin(place(number = 3, couponStop = true).copy(tone = 1))
         assertEquals(PinShape.SQUARE, s.shape)
-        assertEquals(SnapColors.surface, s.fill)
-        assertEquals(SnapColors.ink, s.textColor)
+        assertEquals(SnapColors.brandTones[1], s.fill)
+        assertEquals(SnapColors.surface, s.textColor)
         assertEquals("3", s.text)
     }
 
     @Test
-    fun `branches are gift squares, lime when near, orange-ringed when urgent`() {
-        val b = MapBranch("b", Coords(37.5, 127.0), urgent = true, near = true)
+    fun `brands get colors in the order they were first saved, repeating past the palette`() {
+        val keys = listOf("메가커피", "스타벅스", "메가커피") + List(SnapColors.brandTones.size) { "b$it" }
+        val t = brandToneIndex(keys)
+        assertEquals(0, t["메가커피"])
+        assertEquals(1, t["스타벅스"])
+        assertEquals(0, t["b${SnapColors.brandTones.size - 2}"])
+        assertEquals(SnapColors.brandTones[0], brandTone(SnapColors.brandTones.size))
+    }
+
+    @Test
+    fun `branches are gift squares in their brand's color, orange-ringed when urgent, lime-ringed when near`() {
+        val b = MapBranch("b", Coords(37.5, 127.0), urgent = true, near = true, tone = 2)
         val s = branchPin(b)
         assertEquals(PinShape.SQUARE, s.shape)
         assertEquals(PinIcon.GIFT, s.icon)
         assertEquals("", s.text)
-        assertEquals(SnapColors.lime, s.fill)
+        assertEquals(SnapColors.brandTones[2], s.fill)
+        assertEquals(SnapColors.surface, s.textColor)
         assertEquals(SnapColors.urgent, s.ring)
-        assertEquals(SnapColors.surface, branchPin(b.copy(near = false)).fill)
-        assertEquals(SnapColors.ink, branchPin(b.copy(urgent = false)).ring)
+        assertEquals(SnapColors.lime, branchPin(b.copy(urgent = false)).ring)
+        assertEquals(SnapColors.surface, branchPin(b.copy(urgent = false, near = false)).ring)
+        assertEquals(SnapColors.brandTones[0], branchPin(b.copy(tone = 0)).fill)
     }
 
     @Test

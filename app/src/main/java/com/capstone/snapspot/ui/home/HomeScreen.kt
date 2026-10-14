@@ -46,8 +46,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -66,6 +66,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.capstone.snapspot.core.BRANCH_RADIUS_M
 import com.capstone.snapspot.core.Coords
+import com.capstone.snapspot.core.brandKey
+import com.capstone.snapspot.core.brandKeyOfRegion
 import com.capstone.snapspot.core.dDay
 import com.capstone.snapspot.core.daysLeft
 import com.capstone.snapspot.core.distanceMeters
@@ -86,6 +88,8 @@ import com.capstone.snapspot.ui.components.Shot
 import com.capstone.snapspot.ui.map.MapBranch
 import com.capstone.snapspot.ui.map.MapPlace
 import com.capstone.snapspot.ui.map.SpotMap
+import com.capstone.snapspot.ui.map.brandTone
+import com.capstone.snapspot.ui.map.brandToneIndex
 import com.capstone.snapspot.ui.theme.SnapColors
 import com.capstone.snapspot.ui.theme.SnapShapes
 import com.capstone.snapspot.ui.theme.SnapSpace
@@ -160,6 +164,8 @@ fun HomeScreen(
         if (open == null && tab == Tab.PLACES && i >= 0) listState.animateScrollToItem(header + i)
     }
 
+    // Each gifticon brand keeps one color on the map and in the route, in the order the brands were first saved.
+    val tones = brandToneIndex(coupons.map { it.coupon }.sortedBy { it.createdAt }.map { brandKey(it.brand) })
     // An open bundle numbers its stops in walking order; coupon stops are the branch the route picked.
     val stops = open?.let { routeStops(it) }.orEmpty()
     val numberOf = stops.mapIndexedNotNull { i, st -> st.placeId?.let { it to i + 1 } }.toMap()
@@ -171,13 +177,13 @@ fun HomeScreen(
         )
     } + stops.mapIndexedNotNull { i, st ->
         if (st.placeId != null) null
-        else MapPlace("route-$i", st.at, 0.0, null, ended = false, selected = false, number = i + 1, couponStop = true)
+        else MapPlace("route-$i", st.at, 0.0, null, ended = false, selected = false, number = i + 1, couponStop = true, tone = tones[brandKey(st.brand.orEmpty())] ?: 0)
     }
     // Follows the streets once TMAP answers, straight lines until then.
     val routeLine = if (open == null) emptyList() else walks[open.walkKey]?.line ?: open.line
     val mapBranches = win?.branches.orEmpty().map { (id, b) ->
         val at = Coords(b.latitude, b.longitude)
-        MapBranch(id, at, b.urgent, here?.let { distanceMeters(it, at) <= BRANCH_RADIUS_M } == true)
+        MapBranch(id, at, b.urgent, here?.let { distanceMeters(it, at) <= BRANCH_RADIUS_M } == true, tones[brandKeyOfRegion(id)] ?: 0)
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(SnapColors.bg)) {
@@ -257,7 +263,7 @@ fun HomeScreen(
                         } else {
                             if (coupons.isEmpty()) item(key = "empty") { Empty("저장한 기프티콘이 없어요", "기프티콘 스크린샷을 넣으면 그 브랜드 지점 근처에서 알려 드려요.") }
                             itemsIndexed(coupons, key = { _, c -> c.coupon.id }) { i, item ->
-                                TicketRow(item, now, groupShape(i, coupons.size), onClick = { onCoupon(item.coupon.id) }, onLongClick = { deletingCoupon = item.coupon })
+                                TicketRow(item, tones[brandKey(item.coupon.brand)] ?: 0, now, groupShape(i, coupons.size), onClick = { onCoupon(item.coupon.id) }, onLongClick = { deletingCoupon = item.coupon })
                             }
                         }
                     } else {
@@ -285,7 +291,7 @@ fun HomeScreen(
                         itemsIndexed(stops, key = { i, _ -> "stop-$i" }) { i, st ->
                             val p = places.firstOrNull { it.id == st.placeId }
                             StopRow(
-                                i + 1, st, p, near = p != null && p.id in near, shape = groupShape(i, stops.size),
+                                i + 1, st, p, near = p != null && p.id in near, tone = tones[brandKey(st.brand.orEmpty())] ?: 0, shape = groupShape(i, stops.size),
                                 onClick = p?.let { { vm.focusOn(it.id); showMap() } },
                             )
                         }
@@ -404,7 +410,8 @@ private fun PlaceRow(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TicketRow(item: CouponItem, now: Long, shape: Shape, onClick: () -> Unit, onLongClick: () -> Unit) {
+/** `tone`: the brand's color on the map, shown as a small square before the name so the gift pins read as a legend. */
+private fun TicketRow(item: CouponItem, tone: Int, now: Long, shape: Shape, onClick: () -> Unit, onLongClick: () -> Unit) {
     val c = item.coupon
     val near = item.active && item.nearest != null && item.nearest.second <= BRANCH_RADIUS_M
     Row(
@@ -416,7 +423,10 @@ private fun TicketRow(item: CouponItem, now: Long, shape: Shape, onClick: () -> 
     ) {
         Shot(c.imageUri, 40.dp, 40.dp, modifier = if (item.active) Modifier else Modifier.alpha(0.5f))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(c.brand, style = SnapType.title.copy(fontSize = 15.sp, color = if (item.active) SnapColors.ink else SnapColors.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.size(10.dp).clip(RoundedCornerShape(3.dp)).background(if (item.active) brandTone(tone) else SnapColors.line))
+                Text(c.brand, style = SnapType.title.copy(fontSize = 15.sp, color = if (item.active) SnapColors.ink else SnapColors.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             Text(couponMeta(item), style = SnapType.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         when {
@@ -445,7 +455,7 @@ private fun routeStops(b: BundleItem): List<RouteStop> = b.route.order.indices.m
 }
 
 @Composable
-private fun StopRow(number: Int, stop: RouteStop, place: Place?, near: Boolean, shape: Shape, onClick: (() -> Unit)?) {
+private fun StopRow(number: Int, stop: RouteStop, place: Place?, near: Boolean, tone: Int, shape: Shape, onClick: (() -> Unit)?) {
     Row(
         Modifier.fillMaxWidth().clip(shape).background(SnapColors.surface)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
@@ -453,7 +463,7 @@ private fun StopRow(number: Int, stop: RouteStop, place: Place?, near: Boolean, 
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StopNumber(number, coupon = place == null)
+        StopNumber(number, couponTone = if (place == null) tone else null)
         if (place != null) Shot(place.imageUri, 40.dp, 40.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(stop.name, style = SnapType.title.copy(fontSize = 15.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -463,16 +473,15 @@ private fun StopRow(number: Int, stop: RouteStop, place: Place?, near: Boolean, 
     }
 }
 
-/** Route numbers match the map: ink circle with a lime digit for places, white rounded square for coupon branches. */
+/** Route numbers match the map: ink circle with a lime digit for places, a square in the brand's color for coupon branches. */
 @Composable
-private fun StopNumber(n: Int, coupon: Boolean) {
-    val shape = if (coupon) RoundedCornerShape(4.dp) else CircleShape
+private fun StopNumber(n: Int, couponTone: Int?) {
+    val shape = if (couponTone != null) RoundedCornerShape(4.dp) else CircleShape
     Box(
-        Modifier.size(24.dp).clip(shape).background(if (coupon) SnapColors.surface else SnapColors.ink)
-            .then(if (coupon) Modifier.border(2.dp, SnapColors.ink, shape) else Modifier),
+        Modifier.size(24.dp).clip(shape).background(if (couponTone != null) brandTone(couponTone) else SnapColors.ink),
         contentAlignment = Alignment.Center,
     ) {
-        Text("$n", style = SnapType.meta.copy(fontWeight = FontWeight.Bold, color = if (coupon) SnapColors.ink else SnapColors.lime))
+        Text("$n", style = SnapType.meta.copy(fontWeight = FontWeight.Bold, color = if (couponTone != null) SnapColors.surface else SnapColors.lime))
     }
 }
 
