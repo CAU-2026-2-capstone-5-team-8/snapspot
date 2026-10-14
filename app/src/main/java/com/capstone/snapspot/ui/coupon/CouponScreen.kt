@@ -62,7 +62,7 @@ import com.capstone.snapspot.ui.theme.SnapType
 
 /**
  * The coupon `id`. When its brand has other active coupons, a swipe left and right goes through them,
- * soonest-expiring first, with dots above the header saying which one is open.
+ * soonest-expiring first, with a hint above the title saying which one is open ([SwipeHint]).
  */
 @Composable
 fun CouponScreen(vm: HomeViewModel, id: String, onClose: () -> Unit) {
@@ -76,23 +76,30 @@ fun CouponScreen(vm: HomeViewModel, id: String, onClose: () -> Unit) {
         return
     }
     val pager = rememberPagerState(initialPage = group.indexOfFirst { it.id == id }.coerceAtLeast(0)) { group.size }
-    Box(Modifier.fillMaxSize().background(SnapColors.surface)) {
-        HorizontalPager(pager, Modifier.fillMaxSize(), key = { group[it].id }) { page ->
-            CouponPage(vm, all.firstOrNull { it.id == group[page].id } ?: group[page], onClose)
+    HorizontalPager(pager, Modifier.fillMaxSize().background(SnapColors.surface), key = { group[it].id }) { page ->
+        CouponPage(vm, all.firstOrNull { it.id == group[page].id } ?: group[page], onClose, page to group.size)
+    }
+}
+
+/** "2장 중 1번째" with a dot per coupon: says there is more to swipe to. */
+@Composable
+private fun SwipeHint(index: Int, count: Int, modifier: Modifier = Modifier) {
+    Row(
+        modifier.clearAndSetSemantics { contentDescription = "같은 브랜드 기프티콘 ${count}장 중 ${index + 1}번째, 옆으로 넘겨 다른 기프티콘을 볼 수 있어요" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(count) { i ->
+            Dot(if (i == index) SnapColors.ink else SnapColors.line, 8.dp)
+            Gap(5.dp)
         }
-        val position = "${group.size}장 중 ${pager.currentPage + 1}번째"
-        Row(
-            Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 4.dp).clearAndSetSemantics { contentDescription = position },
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            repeat(group.size) { i -> Dot(if (i == pager.currentPage) SnapColors.ink else SnapColors.line, 6.dp) }
-        }
+        Gap(3.dp)
+        Text("${count}장 중 ${index + 1}번째 · 옆으로 넘겨 보세요", style = SnapType.meta)
     }
 }
 
 /** One coupon, sized for the counter: the screenshot (with its barcode) as large as the screen allows. */
 @Composable
-private fun CouponPage(vm: HomeViewModel, c: Coupon?, onClose: () -> Unit) {
+private fun CouponPage(vm: HomeViewModel, c: Coupon?, onClose: () -> Unit, position: Pair<Int, Int>? = null) {
     val win by vm.window.collectAsState()
     val here by vm.here.collectAsState()
     var menu by remember { mutableStateOf(false) }
@@ -136,6 +143,7 @@ private fun CouponPage(vm: HomeViewModel, c: Coupon?, onClose: () -> Unit) {
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = SnapSpace.gutter),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            position?.let { (i, n) -> SwipeHint(i, n, Modifier.padding(horizontal = 4.dp)) }
             BigTitle(c.brand, c.benefit, Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
             Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(

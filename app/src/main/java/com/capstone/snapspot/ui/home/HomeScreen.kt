@@ -6,6 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -32,8 +36,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.LocationSearching
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -46,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -57,6 +63,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -64,6 +71,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.capstone.snapspot.core.BRANCH_RADIUS_M
@@ -105,6 +113,7 @@ import com.capstone.snapspot.ui.theme.SnapColors
 import com.capstone.snapspot.ui.theme.SnapShapes
 import com.capstone.snapspot.ui.theme.SnapSpace
 import com.capstone.snapspot.ui.theme.SnapType
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 private enum class Tab { PLACES, COUPONS }
@@ -381,7 +390,15 @@ fun HomeScreen(
                     Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 60.dp, end = 12.dp).size(44.dp)
                         .shadow(4.dp, SnapShapes.card).clip(SnapShapes.card).background(SnapColors.surface).clickable { vm.focusHere() },
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.MyLocation, contentDescription = "내 위치로", tint = SnapColors.ink, modifier = Modifier.size(20.dp)) }
+                ) {
+                    // Filled and blue while the map follows the user; hollow once a hand has moved it away.
+                    Icon(
+                        if (following) Icons.Filled.MyLocation else Icons.Filled.LocationSearching,
+                        contentDescription = if (following) "지도가 내 위치를 따라가는 중" else "내 위치로",
+                        tint = if (following) SnapColors.me else SnapColors.ink2,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
                 // After moving the map by hand far from the last search: look up gifticon branches there.
                 val rest = camera
                 if (open == null && !following && rest != null && coupons.any { it.active }) {
@@ -390,9 +407,9 @@ fun HomeScreen(
                         FloatingChip(chip) { Text("지도를 확대하면 지점을 찾을 수 있어요", style = SnapType.label) }
                     } else if (needsMapSearch(searchAt, rest.first)) {
                         FloatingChip(chip, onClick = { vm.searchMap(rest.first) }) {
-                            Icon(Icons.Filled.Refresh, contentDescription = null, tint = SnapColors.ink, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.Search, contentDescription = null, tint = SnapColors.ink, modifier = Modifier.size(16.dp))
                             Gap(6.dp)
-                            Text("이 지역에서 다시 탐색", style = SnapType.label.copy(color = SnapColors.ink))
+                            Text("이 지역 기프티콘 지점 찾기", style = SnapType.label.copy(color = SnapColors.ink))
                         }
                     }
                 }
@@ -423,20 +440,35 @@ fun HomeScreen(
     }
 }
 
-/** A place's card over the map: its screenshot, category, end date and note. Tapping outside closes it. */
+/** Dragged down this far, the place card closes. */
+private val CARD_DISMISS = 96.dp
+
+/**
+ * A place's card over the map: its screenshot, category, end date and note. A light shade keeps the tapped pin
+ * visible; tapping outside or dragging the card down closes it.
+ */
 @Composable
 private fun PlaceCard(p: Place, now: Long, onRoute: (() -> Unit)?, onClose: () -> Unit) {
     val uri = LocalUriHandler.current
     val ended = placeEnded(p, now)
+    val dismissPx = with(LocalDensity.current) { CARD_DISMISS.toPx() }
+    var drag by remember(p.id) { mutableFloatStateOf(0f) }
     Box(
-        Modifier.fillMaxSize().background(SnapColors.ink.copy(alpha = 0.35f)).clickable(onClickLabel = "닫기", onClick = onClose),
+        Modifier.fillMaxSize().background(SnapColors.ink.copy(alpha = 0.15f)).clickable(onClickLabel = "닫기", onClick = onClose),
         contentAlignment = Alignment.BottomCenter,
     ) {
         Column(
-            Modifier.fillMaxWidth().clip(SnapShapes.sheet).background(SnapColors.surface)
-                .clickable(enabled = false, onClick = {}).navigationBarsPadding().padding(SnapSpace.gutter),
+            Modifier.offset { IntOffset(0, drag.roundToInt()) }
+                .draggable(
+                    rememberDraggableState { drag = (drag + it).coerceAtLeast(0f) },
+                    Orientation.Vertical,
+                    onDragStopped = { if (drag > dismissPx) onClose() else drag = 0f },
+                )
+                .shadow(8.dp, SnapShapes.sheet).fillMaxWidth().clip(SnapShapes.sheet).background(SnapColors.surface)
+                .clickable(enabled = false, onClick = {}).navigationBarsPadding().padding(start = SnapSpace.gutter, end = SnapSpace.gutter, bottom = SnapSpace.gutter),
             verticalArrangement = Arrangement.spacedBy(SnapSpace.gutter),
         ) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { SheetHandle() }
             Row {
                 Shot(p.imageUri, 72.dp, 96.dp, modifier = if (ended) Modifier.alpha(0.5f) else Modifier)
                 Gap(SnapSpace.card)
@@ -458,7 +490,7 @@ private fun PlaceCard(p: Place, now: Long, onRoute: (() -> Unit)?, onClose: () -
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(SnapSpace.gap)) {
-                p.placeUrl?.let { url -> SecondaryButton("카카오 상세", { runCatching { uri.openUri(url) } }, Modifier.weight(1f)) }
+                p.placeUrl?.let { url -> SecondaryButton("카카오맵에서 보기", { runCatching { uri.openUri(url) } }, Modifier.weight(1f)) }
                 if (onRoute != null) PrimaryButton("동선 보기", onRoute, Modifier.weight(1f))
                 else SecondaryButton("닫기", onClose, Modifier.weight(1f))
             }
