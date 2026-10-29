@@ -2,6 +2,7 @@ package com.capstone.snapspot.net
 
 import com.capstone.snapspot.core.isDate
 import com.capstone.snapspot.core.model.Extracted
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -29,6 +30,9 @@ private const val PROMPT = """너는 스마트폰 스크린샷에서 "나중에 
 - note: 사용자가 왜 저장했을지 한 문장 (예: "소금빵 맛집", "10월까지 하는 사진전")
 - endDate: 운영 종료일이나 쿠폰 유효기간 마지막 날이 보이면 YYYY-MM-DD, 아니면 null
 추측으로 주소를 지어내지 마."""
+
+/** Sent before text-only input, so Gemini knows there is no image and why some parts read "[전화번호]". */
+private const val TEXT_INTRO = "이미지 대신, 휴대폰이 스크린샷에서 읽은 글자만 보낼게. 개인정보는 [전화번호]처럼 가려 뒀어.\n---\n"
 
 private val SCHEMA = buildJsonObject {
     put("type", "OBJECT")
@@ -68,7 +72,17 @@ class GeminiClient(
     private val client: OkHttpClient,
     private val base: String = "https://generativelanguage.googleapis.com/v1beta",
 ) {
-    suspend fun extract(base64Jpeg: String): Extracted {
+    /** Reads a (masked) screenshot image. */
+    suspend fun extract(base64Jpeg: String): Extracted = generate(
+        buildJsonObject { putJsonObject("inline_data") { put("mime_type", "image/jpeg"); put("data", base64Jpeg) } },
+    )
+
+    /** Reads only the text the phone recognized, with personal information already replaced by labels. */
+    suspend fun extractText(redactedText: String): Extracted = generate(
+        buildJsonObject { put("text", TEXT_INTRO + redactedText) },
+    )
+
+    private suspend fun generate(input: JsonObject): Extracted {
         check(key.isNotEmpty()) { "Gemini API 키가 없어요. local.properties의 GEMINI_API_KEY를 설정하세요." }
         val body = buildJsonObject {
             putJsonArray("contents") {
@@ -77,7 +91,7 @@ class GeminiClient(
                         put("role", "user")
                         putJsonArray("parts") {
                             add(buildJsonObject { put("text", PROMPT) })
-                            add(buildJsonObject { putJsonObject("inline_data") { put("mime_type", "image/jpeg"); put("data", base64Jpeg) } })
+                            add(input)
                         }
                     },
                 )

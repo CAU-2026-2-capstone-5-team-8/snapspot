@@ -54,6 +54,20 @@ class GeminiParseTest {
     }
 
     @Test
+    fun `text-only reading sends the redacted text and no image`() = runTest {
+        val server = MockWebServer().apply { start() }
+        val text = """{\"kind\":\"place\",\"brand\":\"\",\"benefit\":\"\",\"isPlace\":true,\"name\":\"어니언 성수\",\"address\":\"성수동\",\"category\":\"카페\",\"note\":\"\",\"endDate\":null}"""
+        server.enqueue(MockResponse().setBody("""{"candidates":[{"content":{"parts":[{"text":"$text"}]}}]}"""))
+        val g = GeminiClient("gk", "m1", OkHttpClient(), server.url("/v1beta").toString())
+        val e = g.extractText("어니언 성수\n문의 [전화번호]")
+        assertEquals("어니언 성수", e.name)
+        val body = server.takeRequest().body.readUtf8()
+        assertFalse(body.contains("inline_data"))
+        assertTrue(body.contains("[전화번호]"))
+        server.shutdown()
+    }
+
+    @Test
     fun `empty candidates is an error with a Korean message`() = runTest {
         val server = MockWebServer().apply { start() }
         server.enqueue(MockResponse().setBody("""{"candidates":[]}"""))

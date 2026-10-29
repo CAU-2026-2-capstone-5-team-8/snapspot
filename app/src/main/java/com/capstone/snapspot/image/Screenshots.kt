@@ -4,16 +4,16 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
 
-data class PreparedShot(val fileUri: String, val base64Jpeg: String)
+/** A screenshot copied into app storage. Only [ShotReader] decides what of it leaves the phone. */
+data class PreparedShot(val fileUri: String)
 
-/** Copies a picked screenshot into app storage at 1024px wide (what Gemini gets, and what the app keeps). */
+/** Copies a picked screenshot into app storage at 1024px wide (what the app keeps and reads). */
 object Screenshots {
     private const val WIDTH = 1024
 
@@ -34,6 +34,6 @@ object Screenshots {
         }
         val dir = File(ctx.filesDir, "shots").apply { mkdirs() }
         val file = File(dir, "${UUID.randomUUID()}.jpg").apply { writeBytes(bytes) }
-        PreparedShot(Uri.fromFile(file).toString(), Base64.encodeToString(bytes, Base64.NO_WRAP))
+        PreparedShot(Uri.fromFile(file).toString())
     }
 }

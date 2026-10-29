@@ -125,7 +125,9 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun read(batch: Batch, i: Int, prepared: Result<PreparedShot>) {
         try {
             val shot = prepared.getOrThrow()
-            val ex = c.gemini.extract(shot.base64Jpeg)
+            val outcome = c.reader.read(shot)
+            Log.i("SnapSpot", "screenshot read: route=${outcome.route} masked=${outcome.masked}")
+            val ex = outcome.extracted
             updateAt(batch, i) {
                 it.copy(
                     stage = Stage.LOCATING, imageUri = shot.fileUri, name = ex.name, address = ex.address,

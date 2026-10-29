@@ -102,6 +102,10 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.coroutines.play)
     implementation(libs.kakao.map)
+    // On-device reading before anything goes to Gemini (image/ShotReader.kt).
+    implementation(libs.mlkit.text.korean)
+    implementation(libs.mlkit.barcode)
+    implementation(libs.mlkit.face)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
