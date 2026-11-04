@@ -55,17 +55,44 @@ private val PATTERNS: List<Pair<Pii, Regex>> = listOf(
     // A name, @ and a domain. The recognizer drops dots, reads them as commas and adds spaces
     // around them, so the domain's dots are optional; a handle with nothing before @ is not a match.
     Pii.EMAIL to Regex("""[A-Za-z0-9._%+-]+\s?@\s?[A-Za-z0-9-]{2,}(?:\s?[.,]\s?[A-Za-z0-9-]+)*"""),
-    Pii.RRN to Regex("""(?<!\d)\d{6}\s?-\s?[1-4]\d{6}(?!\d)"""),
-    Pii.PHONE to Regex("""(?<!\d)(?:01[016789]|02|0[3-6][1-5]|070)[-.\s]?\d{3,4}[-.\s]?\d{4}(?!\d)"""),
-    Pii.CARD to Regex("""(?<!\d)\d{4}[-\s]\d{4}[-\s]\d{4}[-\s]\d{4}(?!\d)"""),
-    Pii.CODE to Regex("""(?<!\d)\d(?:[\s-]?\d){9,}(?!\d)"""),
+    // The recognizer reads dashes as dots and adds or drops spaces, so between groups any of
+    // " ", "-", "." (or none) is a separator, and a stray space may split a group.
+    Pii.RRN to Regex("""(?<!\d)\d(?:\s?\d){5}$SEP[1-4](?:\s?\d){6}(?!\d)"""),
+    Pii.PHONE to Regex("""(?<!\d)(?:01[016789]|02|0[3-6][1-5]|070)$SEP\d(?:\s?\d){2,3}$SEP\d(?:\s?\d){3}(?!\d)"""),
+    Pii.CARD to Regex("""(?<!\d)$G4$SEP$G4$SEP$G4$SEP$G4(?!\d)"""),
+    // Groups of three or more digits, so dates (2026.12.31) and times never join one; at least
+    // ten digits in all, checked in findPii.
+    Pii.CODE to Regex("""(?<![\d.])\d(?:\s?\d){2,}(?:(?:\s?[-.]\s?|\s)\d(?:\s?\d){2,})*(?![\d])"""),
 )
+
+private const val SEP = """\s?[-.]?\s?"""
+
+/** Four digits, maybe split by a stray space. */
+private const val G4 = """\d(?:\s?\d){3}"""
+private const val CODE_MIN_DIGITS = 10
+
+/**
+ * `text` with the recognizer's usual misreads inside numbers undone, letter for letter so
+ * positions still match: O or o next to a digit is a 0, and ~ is a dash.
+ */
+private fun normalizeDigits(text: String): String {
+    val c = text.toCharArray()
+    repeat(2) { // twice, so "OO1" becomes "001"
+        for (i in c.indices) {
+            if ((c[i] == 'O' || c[i] == 'o') && (c.getOrNull(i - 1)?.isDigit() == true || c.getOrNull(i + 1)?.isDigit() == true)) c[i] = '0'
+        }
+    }
+    for (i in c.indices) if (c[i] == '~') c[i] = '-'
+    return String(c)
+}
 
 /** Personal information in `text`, by position. Dates (2026.12.31) and prices are left alone. */
 fun findPii(text: String): List<PiiHit> {
     val hits = mutableListOf<PiiHit>()
+    val numbers = normalizeDigits(text)
     for ((kind, re) in PATTERNS) {
-        for (m in re.findAll(text)) {
+        for (m in re.findAll(if (kind == Pii.EMAIL) text else numbers)) {
+            if (kind == Pii.CODE && m.value.count { it.isDigit() } < CODE_MIN_DIGITS) continue
             if (hits.none { it.range.first <= m.range.last && m.range.first <= it.range.last }) {
                 hits += PiiHit(kind, m.range)
             }
