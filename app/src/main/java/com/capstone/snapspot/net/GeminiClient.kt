@@ -2,7 +2,9 @@ package com.capstone.snapspot.net
 
 import com.capstone.snapspot.core.isDate
 import com.capstone.snapspot.core.model.Extracted
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.add
@@ -145,7 +147,7 @@ class GeminiClient(
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
         val text = client.newCall(req).await().use { res ->
-            val raw = res.body?.string().orEmpty()
+            val raw = withContext(Dispatchers.IO) { res.body?.string().orEmpty() }
             if (!res.isSuccessful) throw GeminiHttpException(res.code, raw)
             val root = json.parseToJsonElement(raw).jsonObject
             root["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
