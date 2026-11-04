@@ -38,6 +38,30 @@ class RedactTest {
     }
 
     @Test
+    fun `numbers the recognizer garbled are still hidden`() {
+        // Dashes read as ~ or ., 0 read as O, spaces dropped or added inside the number.
+        val cases = mapOf(
+            "O1O-1234-5678" to Pii.PHONE, "010~1234~5678" to Pii.PHONE, "0101234 5678" to Pii.PHONE,
+            "010-12 34-5678" to Pii.PHONE, "02.123~4567" to Pii.PHONE,
+            "030301~3123456" to Pii.RRN, "030301.3123456" to Pii.RRN, "O30301-3123456" to Pii.RRN, "0303 01-3123456" to Pii.RRN,
+            "1234~5678~9012~3456" to Pii.CARD, "1234.5678.9012.3456" to Pii.CARD, "1234 56789012 3456" to Pii.CARD,
+            "9123.4567-8901" to Pii.CODE, "2O261104123456" to Pii.CODE,
+        )
+        for ((v, kind) in cases) {
+            val hits = findPii("번호 $v 입니다")
+            assertEquals(listOf(kind), hits.map { it.kind }, v)
+            assertEquals("번호 [${kind.label}] 입니다", redactText("번호 $v 입니다"), v)
+        }
+    }
+
+    @Test
+    fun `dates, prices and times next to each other are left alone`() {
+        for (t in listOf("2026.12.31 4500원", "2026.12.31 2027.01.15", "08:00 - 22:00", "아차산로9길 8 3층", "D-12 1+1", "2026-11-04 10:30")) {
+            assertEquals(emptyList<Pii>(), findPii(t).map { it.kind }, t)
+        }
+    }
+
+    @Test
     fun `a handle without a name before it is not an email`() {
         assertEquals(emptyList<Pii>(), findPii("@onion_seongsu 성수동").map { it.kind })
     }
