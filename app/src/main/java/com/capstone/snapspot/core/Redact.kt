@@ -52,7 +52,9 @@ data class PiiHit(val kind: Pii, val range: IntRange)
 
 /** Checked in this order; a later pattern never claims characters an earlier one took. */
 private val PATTERNS: List<Pair<Pii, Regex>> = listOf(
-    Pii.EMAIL to Regex("""[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"""),
+    // A name, @ and a domain. The recognizer drops dots, reads them as commas and adds spaces
+    // around them, so the domain's dots are optional; a handle with nothing before @ is not a match.
+    Pii.EMAIL to Regex("""[A-Za-z0-9._%+-]+\s?@\s?[A-Za-z0-9-]{2,}(?:\s?[.,]\s?[A-Za-z0-9-]+)*"""),
     Pii.RRN to Regex("""(?<!\d)\d{6}\s?-\s?[1-4]\d{6}(?!\d)"""),
     Pii.PHONE to Regex("""(?<!\d)(?:01[016789]|02|0[3-6][1-5]|070)[-.\s]?\d{3,4}[-.\s]?\d{4}(?!\d)"""),
     Pii.CARD to Regex("""(?<!\d)\d{4}[-\s]\d{4}[-\s]\d{4}[-\s]\d{4}(?!\d)"""),

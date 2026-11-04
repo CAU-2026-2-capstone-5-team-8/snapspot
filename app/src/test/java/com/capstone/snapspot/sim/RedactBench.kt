@@ -184,6 +184,7 @@ private fun noisy(l: Line, r: Random): Line {
             c == '-' && inPii && r.nextDouble() < 0.15 -> { at[i] = out.length; out.append(if (r.nextBoolean()) '~' else '.') }
             c == ' ' && inPii && r.nextDouble() < 0.15 -> Unit // dropped
             c == '0' && inPii && r.nextDouble() < 0.05 -> { at[i] = out.length; out.append('O') }
+            c == '.' && inPii && r.nextDouble() < 0.15 -> if (r.nextBoolean()) Unit else { at[i] = out.length; out.append(',') }
             else -> { at[i] = out.length; out.append(c) }
         }
         if (inPii && c.isDigit() && i + 1 < l.text.length && l.text[i + 1].isDigit() && r.nextDouble() < 0.02) out.append(' ')
@@ -254,7 +255,7 @@ private fun report(clean: RedactResult, noise: RedactResult): String = buildStri
     appendLine("## 개인정보 가림률 (합성 스크린샷)")
     appendLine()
     appendLine("가짜 개인정보를 넣은 합성 스크린샷 ${SCREENSHOTS}장(기프티콘·게시물·대화·영수증·포스터)으로 `core/Redact.kt`를 재요.")
-    appendLine("값은 모두 고정 시드($SEED)로 만든 가짜예요. `흔들림`은 OCR 오류를 흉내 낸 것(구분자 바뀜, 띄어쓰기 빠짐·추가, 0→O)이에요.")
+    appendLine("값은 모두 고정 시드($SEED)로 만든 가짜예요. `흔들림`은 OCR 오류를 흉내 낸 것(구분자 바뀜, 점 빠짐·쉼표, 띄어쓰기 빠짐·추가, 0→O)이에요.")
     appendLine()
     appendLine("- 깨끗한 글자는 정규식이 아는 형식만 만들었으니 100%가 정상이에요. 실제 차이는 `흔들림` 열에서 봐요.")
     appendLine("- 글자: 가린 글자(`[전화번호]` 등)에 값이 통째로 들어간 비율")
