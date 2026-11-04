@@ -63,7 +63,7 @@ private class LineBuilder {
 
 private fun line(f: LineBuilder.() -> Unit) = LineBuilder().apply(f).build()
 
-private class Fake(val r: Random) {
+private class FakePii(val r: Random) {
     fun digits(n: Int) = (1..n).joinToString("") { r.nextInt(10).toString() }
     fun pick(vararg s: String) = s[r.nextInt(s.size)]
 
@@ -127,7 +127,7 @@ private class Fake(val r: Random) {
 }
 
 /** Five kinds of screenshot, each mixing personal information with what the app needs. */
-private fun screenshot(f: Fake): List<Line> = when (f.r.nextInt(5)) {
+private fun screenshot(f: FakePii): List<Line> = when (f.r.nextInt(5)) {
     0 -> listOf( // gift card
         line { t("받은 선물") },
         line { t(f.pick("스타벅스", "메가MGC커피", "투썸플레이스", "CU")) },
@@ -214,20 +214,20 @@ private fun wordsOf(l: Line, range: IntRange): List<Int> {
     return out
 }
 
-private class Tally {
+private class RedactTally {
     var n = 0
     var text = 0 // fully inside a text hit (redactText leaves nothing of it)
     var image = 0 // every word it spans is painted over
     fun rate(k: Int) = if (n == 0) "-" else "%.1f%%".format(Locale.US, 100.0 * k / n)
 }
 
-private class Result(val byKind: Map<Kind, Tally>)
+private class RedactResult(val byKind: Map<Kind, RedactTally>)
 
 /** The same screenshots both times (one seed); the noise has its own seed. */
-private fun measure(withNoise: Boolean): Result {
-    val f = Fake(Random(SEED))
+private fun measure(withNoise: Boolean): RedactResult {
+    val f = FakePii(Random(SEED))
     val noise = Random(SEED + 1)
-    val tallies = Kind.entries.associateWith { Tally() }
+    val tallies = Kind.entries.associateWith { RedactTally() }
     repeat(SCREENSHOTS) {
         val lines = screenshot(f).map { if (withNoise) noisy(it, noise) else it }
         val page = OcrPage(1080, lines.size * 40, lines.mapIndexed { i, l -> ocr(l, i * 40) })
@@ -247,10 +247,10 @@ private fun measure(withNoise: Boolean): Result {
             }
         }
     }
-    return Result(tallies)
+    return RedactResult(tallies)
 }
 
-private fun report(clean: Result, noise: Result): String = buildString {
+private fun report(clean: RedactResult, noise: RedactResult): String = buildString {
     appendLine("## 개인정보 가림률 (합성 스크린샷)")
     appendLine()
     appendLine("가짜 개인정보를 넣은 합성 스크린샷 ${SCREENSHOTS}장(기프티콘·게시물·대화·영수증·포스터)으로 `core/Redact.kt`를 재요.")
