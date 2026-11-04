@@ -125,12 +125,15 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun read(batch: Batch, i: Int, prepared: Result<PreparedShot>) {
         try {
             val shot = prepared.getOrThrow()
-            val ex = c.gemini.extract(shot.base64Jpeg)
+            val outcome = c.reader.read(shot)
+            Log.i("SnapSpot", "screenshot read: route=${outcome.route} masked=${outcome.masked}")
+            val ex = outcome.extracted
             updateAt(batch, i) {
                 it.copy(
                     stage = Stage.LOCATING, imageUri = shot.fileUri, name = ex.name, address = ex.address,
                     category = ex.category, note = ex.note, endDate = ex.endDate.orEmpty(), isPlace = ex.isPlace,
                     kind = ex.kind, brand = ex.brand, benefit = ex.benefit,
+                    barcode = outcome.barcode.takeIf { ex.kind == "coupon" },
                 )
             }
             if (ex.kind == "coupon") {
@@ -222,7 +225,7 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
         val result = if (d.kind == "coupon") {
             val coupon = buildCoupon(d, "c_${now.toString(36)}", now) ?: return SaveResult.NotReady
             if (!allowDuplicate) {
-                findDuplicateCoupon(c.repo.coupons.value, coupon.brand, coupon.benefit, coupon.expiresAt)
+                findDuplicateCoupon(c.repo.coupons.value, coupon.brand, coupon.benefit, coupon.expiresAt, coupon.barcode)
                     ?.let { return SaveResult.DuplicateCoupon(it) }
             }
             c.repo.upsertCoupon(coupon)

@@ -42,6 +42,8 @@ data class Draft(
     val radius: Int = 200,
     /** Why reading failed; shown when this screenshot's turn comes, not while another is on screen. */
     val readError: String? = null,
+    /** Coupons only: the gift card number read from the barcode on the phone. */
+    val barcode: String? = null,
 )
 
 /** At most this many screenshots at once: each one is a Gemini call. */
@@ -137,5 +139,6 @@ fun buildCoupon(d: Draft, id: String, now: Long): Coupon? {
         expiresAt = d.endDate.trim().takeIf { isDate(it) },
         imageUri = d.imageUri.ifEmpty { null },
         createdAt = now,
+        barcode = d.barcode,
     )
 }

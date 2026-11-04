@@ -63,6 +63,15 @@ android {
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }
+            // ./gradlew :app:testDebugUnitTest -PredactBench [-PredactWrite]: redaction rate on synthetic screenshots (docs/redaction.md).
+            if (project.hasProperty("redactBench")) {
+                it.filter.includeTestsMatching("*RedactBench*")
+                it.systemProperty("redact.run", "true")
+                it.systemProperty("redact.write", project.hasProperty("redactWrite").toString())
+                it.systemProperty("redact.out", rootProject.file("docs/redaction.md").absolutePath)
+                it.testLogging.showStandardStreams = true
+                it.outputs.upToDateWhen { false }
+            }
             // ./gradlew :app:testDebugUnitTest -ProuteBench [-ProuteWrite]: route algorithm benchmark (docs/route.md).
             if (project.hasProperty("routeBench")) {
                 it.filter.includeTestsMatching("*RouteBench*")
@@ -102,6 +111,9 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.coroutines.play)
     implementation(libs.kakao.map)
+    // On-device reading before anything goes to Gemini (image/ShotReader.kt).
+    implementation(libs.mlkit.text.korean)
+    implementation(libs.mlkit.barcode)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

@@ -38,6 +38,8 @@ data class Coupon(
     /** Set when the user marks it used; used coupons stop alerting. */
     val usedAt: Long? = null,
     val lastNotifiedAt: Long? = null,
+    /** The gift card number read from its barcode on the phone. Stays on the phone; never sent. */
+    val barcode: String? = null,
 )
 
 /** What Gemini read from a screenshot. */

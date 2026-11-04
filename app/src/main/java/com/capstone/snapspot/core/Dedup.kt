@@ -26,13 +26,25 @@ private val SPACE = Regex("""\s+""")
 private fun benefitKey(s: String) = s.lowercase().replace(SPACE, "")
 
 /**
- * An unused coupon with the same brand, benefit and expiry. People can really hold two identical
- * gift cards, so the caller asks before adding another rather than refusing.
+ * An unused coupon that is the same gift card. When both carry a barcode number read on the phone,
+ * the numbers decide: two identical gift cards have different barcodes. Otherwise it is the same
+ * brand, benefit and expiry; people can really hold two such cards, so the caller asks before
+ * adding another rather than refusing.
  */
-fun findDuplicateCoupon(existing: List<Coupon>, brand: String, benefit: String, expiresAt: String?): Coupon? {
+fun findDuplicateCoupon(
+    existing: List<Coupon>,
+    brand: String,
+    benefit: String,
+    expiresAt: String?,
+    barcode: String? = null,
+): Coupon? {
     val key = brandKey(brand)
     val b = benefitKey(benefit)
     return existing.firstOrNull {
-        it.usedAt == null && brandKey(it.brand) == key && benefitKey(it.benefit) == b && it.expiresAt == expiresAt
+        it.usedAt == null && if (barcode != null && it.barcode != null) {
+            it.barcode == barcode
+        } else {
+            brandKey(it.brand) == key && benefitKey(it.benefit) == b && it.expiresAt == expiresAt
+        }
     }
 }

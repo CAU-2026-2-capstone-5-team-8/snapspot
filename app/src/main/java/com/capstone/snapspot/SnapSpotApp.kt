@@ -8,6 +8,7 @@ import com.capstone.snapspot.data.PendingStore
 import com.capstone.snapspot.data.RegionNames
 import com.capstone.snapspot.data.Repository
 import com.capstone.snapspot.geofence.GeofenceSync
+import com.capstone.snapspot.image.ShotReader
 import com.capstone.snapspot.location.LocationTracker
 import com.capstone.snapspot.net.GeminiClient
 import com.capstone.snapspot.net.KakaoHttp
@@ -28,6 +29,8 @@ class AppContainer(ctx: Context) {
     val kakao = KakaoHttp(BuildConfig.KAKAO_REST_KEY, http)
     val walk = TmapWalk(BuildConfig.TMAP_APP_KEY, http)
     val gemini = GeminiClient(BuildConfig.GEMINI_API_KEY, BuildConfig.GEMINI_MODEL.ifEmpty { "gemini-3.5-flash-lite" }, http)
+    /** Reads screenshots on the device first and hides personal information before Gemini sees any of it. */
+    val reader = ShotReader(gemini)
     val branchCache = FileBranchCache(dir)
     val pending = PendingStore(dir)
     val regionNames = RegionNames(dir)
