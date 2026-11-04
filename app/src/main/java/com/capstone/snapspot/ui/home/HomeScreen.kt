@@ -158,13 +158,15 @@ fun HomeScreen(
     val selected by vm.selected.collectAsState()
     val bundleItems by vm.bundles.collectAsState()
     val openBundle by vm.openBundle.collectAsState()
+    val course by vm.openCourse.collectAsState()
+    val routePicker by vm.routePicker.collectAsState()
     val couponsOn by vm.withCoupons.collectAsState()
     val walks by vm.walks.collectAsState()
     val found by vm.mapBranches.collectAsState()
     val following by vm.following.collectAsState()
     val camera by vm.camera.collectAsState()
     val searchAt by vm.mapSearchAt.collectAsState()
-    val open = bundleItems.firstOrNull { it.bundle.id == openBundle }
+    val open = course
     var tab by rememberSaveable { mutableStateOf(Tab.PLACES) }
     var deletingPlace by remember { mutableStateOf<Place?>(null) }
     var deletingCoupon by remember { mutableStateOf<Coupon?>(null) }
@@ -179,7 +181,7 @@ fun HomeScreen(
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     // Back closes an open route instead of leaving the app.
-    BackHandler(enabled = open != null) { open?.let { vm.toggleBundle(it.bundle.id) } }
+    BackHandler(enabled = openBundle != null) { vm.closeRoute() }
     BackHandler(enabled = info != null) { info = null }
     // Row taps and bundle opens move the map: collapse the sheet so the result is visible.
     val showMap: () -> Unit = { scope.launch { sheet.bottomSheetState.partialExpand() } }
@@ -243,7 +245,7 @@ fun HomeScreen(
                         bottom = 96.dp + navBottom + collapsedListPadding(sheetHeight, peek, sheet.bottomSheetState.targetValue == SheetValue.PartiallyExpanded),
                     ),
                 ) {
-                    if (open == null) {
+                    if (openBundle == null) {
                         // Header rows: keep in step with listHeader().
                         item(key = "headline") {
                             val h = homeHeadline(hereName, near.size, places.size, perms.alertsOn)
@@ -271,7 +273,7 @@ fun HomeScreen(
                         if (bundleItems.isNotEmpty()) item(key = "bundles") {
                             LazyRow(Modifier.padding(bottom = SnapSpace.gap), horizontalArrangement = Arrangement.spacedBy(SnapSpace.gap)) {
                                 items(bundleItems, key = { it.bundle.id }) { b ->
-                                    BundleCard(b, walks[b.walkKey]?.minutes ?: b.minutes, Modifier.fillParentMaxWidth(if (bundleItems.size == 1) 1f else 0.86f)) { vm.toggleBundle(b.bundle.id); showMap() }
+                                    BundleCard(b, Modifier.fillParentMaxWidth(if (bundleItems.size == 1) 1f else 0.86f)) { info = null; vm.chooseRoutePlaces(b.bundle.id) }
                                 }
                             }
                         }
@@ -302,7 +304,7 @@ fun HomeScreen(
                                 TicketRow(item, tones[brandKey(item.coupon.brand)] ?: 0, now, groupShape(i, coupons.size), onClick = { onCoupon(item.coupon.id) }, onLongClick = { deletingCoupon = item.coupon })
                             }
                         }
-                    } else {
+                    } else if (open != null) {
                         item(key = "bundle-head") {
                             Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp, bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
                                 BigTitle("가 볼 곳 ${open.route.order.size}곳", "걸어서 ${walks[open.walkKey]?.minutes ?: open.minutes}분", Modifier.weight(1f))
@@ -317,6 +319,15 @@ fun HomeScreen(
                                     ),
                                 )
                             }
+                        }
+                        item(key = "bundle-edit") {
+                            Column(Modifier.padding(bottom = SnapSpace.gap), verticalArrangement = Arrangement.spacedBy(SnapSpace.gap)) {
+                                SecondaryButton("코스 변경", { info = null; vm.chooseRoutePlaces(open.bundle.id) }, Modifier.fillMaxWidth())
+                                Text("골라 둔 ${open.routePlaces.size}곳으로 만든 이번 코스예요.", style = SnapType.meta)
+                            }
+                        }
+                        if (open.couponsLoading) item(key = "bundle-loading") {
+                            Notice("이 코스에서 쓸 기프티콘 지점을 찾고 있어요.", modifier = Modifier.padding(bottom = SnapSpace.gap))
                         }
                         if (open.couponsFailed) item(key = "bundle-failed") {
                             Notice(
@@ -333,12 +344,16 @@ fun HomeScreen(
                         }
                         item(key = "bundle-preview") {
                             Text(
-                                "알림 미리 보기",
+                                "동네 알림 미리 보기",
                                 style = SnapType.button.copy(color = SnapColors.ink2),
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(top = SnapSpace.gap).clip(SnapShapes.card)
                                     .clickable { vm.previewBundle(open.bundle.id) }.padding(vertical = 14.dp),
                             )
+                        }
+                    } else {
+                        item(key = "route-solving") {
+                            Notice("선택한 장소로 동선을 만들고 있어요.", modifier = Modifier.padding(vertical = SnapSpace.gap))
                         }
                     }
                 }
@@ -374,13 +389,13 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (open == null) {
+                    if (openBundle == null) {
                         FloatingChip(Modifier.weight(1f, fill = false)) { Text("SnapSpot", style = SnapType.logo) }
                     } else {
-                        FloatingChip(Modifier.weight(1f, fill = false), onClick = { vm.toggleBundle(open.bundle.id) }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "묶음 닫기", tint = SnapColors.ink, modifier = Modifier.size(18.dp))
+                        FloatingChip(Modifier.weight(1f, fill = false), onClick = { vm.closeRoute() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "코스 닫기", tint = SnapColors.ink, modifier = Modifier.size(18.dp))
                             Gap(6.dp)
-                            Text(bundleTitle(open.name), style = SnapType.title.copy(fontSize = 15.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("내가 고른 코스", style = SnapType.title.copy(fontSize = 15.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                     Gap(8.dp)
@@ -401,7 +416,7 @@ fun HomeScreen(
                 }
                 // After moving the map by hand far from the last search: look up gifticon branches there.
                 val rest = camera
-                if (open == null && !following && rest != null && coupons.any { it.active }) {
+                if (openBundle == null && !following && rest != null && coupons.any { it.active }) {
                     val chip = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 64.dp)
                     if (rest.second < MAP_MIN_SEARCH_ZOOM) {
                         FloatingChip(chip) { Text("지도를 확대하면 지점을 찾을 수 있어요", style = SnapType.label) }
@@ -415,7 +430,7 @@ fun HomeScreen(
                 }
             }
         }
-        if (open == null) {
+        if (openBundle == null) {
             Box(
                 Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(16.dp).size(56.dp)
                     .shadow(6.dp, SnapShapes.card).clip(SnapShapes.card).background(SnapColors.ink).clickable(onClick = onAdd),
@@ -426,8 +441,27 @@ fun HomeScreen(
             val bundle = bundleItems.firstOrNull { b -> b.bundle.places.any { it.id == p.id } }
             PlaceCard(
                 p, now,
-                onRoute = bundle?.takeIf { it.bundle.id != openBundle }?.let { b -> { info = null; vm.toggleBundle(b.bundle.id); showMap() } },
+                onRoute = bundle?.takeIf { it.bundle.id != openBundle }?.let { b -> { info = null; vm.chooseRoutePlaces(b.bundle.id) } },
                 onClose = { info = null },
+            )
+        }
+    }
+
+    routePicker?.let { request ->
+        val source = bundleItems.firstOrNull { it.bundle.id == request.bundleId }
+        if (source != null) {
+            RoutePlacePicker(
+                requestId = request.token,
+                places = places,
+                originalIds = source.bundle.places.map { it.id }.toSet(),
+                initialIds = request.initialIds,
+                now = now,
+                onDismiss = vm::dismissRoutePlacePicker,
+                onApply = { ids ->
+                    vm.applyRoutePlaces(ids).also { applied ->
+                        if (applied) showMap()
+                    }
+                },
             )
         }
     }
@@ -491,7 +525,7 @@ private fun PlaceCard(p: Place, now: Long, onRoute: (() -> Unit)?, onClose: () -
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(SnapSpace.gap)) {
                 p.placeUrl?.let { url -> SecondaryButton("카카오맵에서 보기", { runCatching { uri.openUri(url) } }, Modifier.weight(1f)) }
-                if (onRoute != null) PrimaryButton("동선 보기", onRoute, Modifier.weight(1f))
+                if (onRoute != null) PrimaryButton("코스 만들기", onRoute, Modifier.weight(1f))
                 else SecondaryButton("닫기", onClose, Modifier.weight(1f))
             }
         }
@@ -579,11 +613,11 @@ private class RouteStop(val placeId: String?, val name: String, val at: Coords, 
 private fun routeStops(b: BundleItem): List<RouteStop> = b.route.order.indices.map { i ->
     val s = b.route.order[i]
     val k = b.route.picks[i]
-    if (s < b.bundle.places.size) {
-        val p = b.bundle.places[s]
+    if (s < b.routePlaces.size) {
+        val p = b.routePlaces[s]
         RouteStop(p.id, p.name, Coords(p.latitude, p.longitude))
     } else {
-        val cs = b.coupons[s - b.bundle.places.size]
+        val cs = b.coupons[s - b.routePlaces.size]
         val br = cs.branches[k]
         RouteStop(null, br.name, Coords(br.latitude, br.longitude), cs.brand)
     }
@@ -621,18 +655,18 @@ private fun StopNumber(n: Int, couponTone: Int?) {
 }
 
 @Composable
-private fun BundleCard(b: BundleItem, minutes: Int, modifier: Modifier, onOpen: () -> Unit) {
+private fun BundleCard(b: BundleItem, modifier: Modifier, onOpen: () -> Unit) {
     Row(
         modifier.clip(SnapShapes.card).background(SnapColors.surface).clickable(onClick = onOpen).padding(SnapSpace.card),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(bundleTitle(b.name), style = SnapType.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("가 볼 곳 ${b.route.order.size}곳 · 걸어서 ${minutes}분", style = SnapType.meta, maxLines = 1)
+            Text("${b.name}에 저장한 ${b.bundle.places.size}곳", style = SnapType.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("오늘 갈 곳을 골라보세요", style = SnapType.meta, maxLines = 1)
         }
         Text(
-            "동선 보기",
+            "코스 만들기",
             style = SnapType.meta.copy(fontWeight = FontWeight.ExtraBold, color = SnapColors.lime),
             modifier = Modifier.clip(SnapShapes.small).background(SnapColors.ink).padding(horizontal = 10.dp, vertical = 8.dp),
         )
