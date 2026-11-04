@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.net.Uri
 import android.util.Base64
+import com.capstone.snapspot.core.Barcode
 import com.capstone.snapspot.core.Box
 import com.capstone.snapspot.core.OcrLine
 import com.capstone.snapspot.core.OcrPage
@@ -20,7 +21,6 @@ import com.capstone.snapspot.core.planRead
 import com.capstone.snapspot.net.GeminiClient
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
@@ -31,12 +31,15 @@ import java.io.ByteArrayOutputStream
 /** The on-device step failed, so the screenshot was not sent anywhere. */
 class RedactionFailed(cause: Throwable) : Exception("on-device scan failed", cause)
 
-/** What reading one screenshot took: the answer, how it was read, and how much was hidden. */
-data class ReadOutcome(val extracted: Extracted, val route: ReadRoute, val masked: Int)
+/**
+ * What reading one screenshot took: the answer, how it was read, how much was hidden, and the
+ * gift card number read from its barcode on the phone (kept here, never sent).
+ */
+data class ReadOutcome(val extracted: Extracted, val route: ReadRoute, val masked: Int, val barcode: String? = null)
 
 /**
  * Reads a screenshot with as little leaving the phone as possible:
- * 1. ML Kit reads the text, barcodes and faces on the device.
+ * 1. ML Kit reads the text and barcodes (with their numbers) on the device.
  * 2. Personal information is found (`core/Redact.kt`) and hidden.
  * 3. A gift card the rules can read is finished here; otherwise only the redacted text goes to
  *    Gemini, and the masked image only when the text is not enough.
@@ -45,7 +48,6 @@ data class ReadOutcome(val extracted: Extracted, val route: ReadRoute, val maske
 class ShotReader(private val gemini: GeminiClient) {
     private val text by lazy { TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build()) }
     private val barcodes by lazy { BarcodeScanning.getClient() }
-    private val faces by lazy { FaceDetection.getClient() }
 
     suspend fun read(shot: PreparedShot): ReadOutcome {
         val bitmap = withContext(Dispatchers.IO) {
@@ -58,15 +60,15 @@ class ShotReader(private val gemini: GeminiClient) {
         }
         val plan = planRead(page)
         when (plan.route) {
-            ReadRoute.LOCAL -> return ReadOutcome(plan.local!!, ReadRoute.LOCAL, plan.masked)
+            ReadRoute.LOCAL -> return ReadOutcome(plan.local!!, ReadRoute.LOCAL, plan.masked, plan.barcode)
             ReadRoute.TEXT -> {
                 val ex = gemini.extractText(plan.text)
-                if (!needsImage(ex)) return ReadOutcome(ex, ReadRoute.TEXT, plan.masked)
+                if (!needsImage(ex)) return ReadOutcome(ex, ReadRoute.TEXT, plan.masked, plan.barcode)
             }
             ReadRoute.IMAGE -> Unit
         }
         val masked = withContext(Dispatchers.Default) { maskedJpeg(bitmap, maskBoxes(page)) }
-        return ReadOutcome(gemini.extract(masked), ReadRoute.IMAGE, plan.masked)
+        return ReadOutcome(gemini.extract(masked), ReadRoute.IMAGE, plan.masked, plan.barcode)
     }
 
     private suspend fun scan(bitmap: Bitmap): OcrPage {
@@ -77,9 +79,8 @@ class ShotReader(private val gemini: GeminiClient) {
                 OcrLine(line.elements.mapNotNull { el -> el.boundingBox?.let { OcrWord(el.text, it.toBox()) } })
             }
         }.filter { it.words.isNotEmpty() }
-        val codes = barcodes.process(image).await().mapNotNull { it.boundingBox?.toBox() }
-        val people = faces.process(image).await().map { it.boundingBox.toBox() }
-        return OcrPage(bitmap.width, bitmap.height, lines, codes, people)
+        val codes = barcodes.process(image).await().mapNotNull { b -> b.boundingBox?.let { Barcode(it.toBox(), b.rawValue) } }
+        return OcrPage(bitmap.width, bitmap.height, lines, codes)
     }
 
     private fun maskedJpeg(src: Bitmap, boxes: List<Box>): String {

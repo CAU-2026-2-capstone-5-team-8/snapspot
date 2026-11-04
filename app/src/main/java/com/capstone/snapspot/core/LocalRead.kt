@@ -27,6 +27,8 @@ data class ReadPlan(
     val local: Extracted?,
     /** Pieces of personal information found (and hidden). */
     val masked: Int,
+    /** The gift card number read from its barcode on the phone, if any. Never sent. */
+    val barcode: String? = null,
 )
 
 /** Below this many letters and digits, text alone is not enough to read the screenshot. */
@@ -84,11 +86,21 @@ fun findBenefit(lines: List<String>, brand: String): String? {
     }?.removePrefix(brand)?.trim()?.takeIf { it.isNotEmpty() }
 }
 
+/** A barcode value that looks like a gift card number: 8 to 40 letters and digits once spaces and dashes go. */
+private val GIFT_CODE = Regex("""[0-9A-Za-z]{8,40}""")
+
+/** The first barcode on the page that holds a gift card number, as one run of letters and digits. */
+fun giftCode(page: OcrPage): String? = page.barcodes.firstNotNullOfOrNull { b ->
+    b.value?.replace(Regex("""[\s-]"""), "")?.takeIf { GIFT_CODE.matches(it) }
+}
+
 fun planRead(page: OcrPage, minTextChars: Int = MIN_TEXT_CHARS): ReadPlan {
     val text = redactedText(page)
     val masked = piiCount(page)
+    val barcode = giftCode(page)
     val lines = text.lines()
-    val gift = GIFT_WORDS.any { text.contains(it) }
+    // A barcode with a gift card number is as good a sign of a gift card as the words on it.
+    val gift = barcode != null || GIFT_WORDS.any { text.contains(it) }
     val brand = findBrand(text)
     val expiry = findExpiry(text)
     val benefit = brand?.let { findBenefit(lines, it) }
@@ -97,10 +109,10 @@ fun planRead(page: OcrPage, minTextChars: Int = MIN_TEXT_CHARS): ReadPlan {
             kind = "coupon", brand = brand, benefit = benefit, isPlace = false,
             name = brand, address = "", category = "기타", note = "", endDate = expiry,
         )
-        return ReadPlan(ReadRoute.LOCAL, text, local, masked)
+        return ReadPlan(ReadRoute.LOCAL, text, local, masked, barcode)
     }
     val chars = text.count { it.isLetterOrDigit() }
-    return ReadPlan(if (chars >= minTextChars) ReadRoute.TEXT else ReadRoute.IMAGE, text, null, masked)
+    return ReadPlan(if (chars >= minTextChars) ReadRoute.TEXT else ReadRoute.IMAGE, text, null, masked, barcode)
 }
 
 /** A text-only answer this empty means the text was not enough; read the masked image instead. */

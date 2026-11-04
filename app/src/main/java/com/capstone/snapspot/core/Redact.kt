@@ -24,13 +24,18 @@ data class OcrLine(val words: List<OcrWord>) {
     val text: String get() = words.joinToString(" ") { it.text }
 }
 
+/**
+ * A barcode or QR code the phone found. [value] is what it encodes (the gift card number),
+ * read on the device; it is kept on the phone and never sent.
+ */
+data class Barcode(val box: Box, val value: String? = null)
+
 /** Everything read on the device from one screenshot. */
 data class OcrPage(
     val width: Int,
     val height: Int,
     val lines: List<OcrLine>,
-    val barcodes: List<Box> = emptyList(),
-    val faces: List<Box> = emptyList(),
+    val barcodes: List<Barcode> = emptyList(),
 )
 
 enum class Pii(val label: String) {
@@ -79,12 +84,12 @@ fun redactText(text: String): String {
 /** The page's text, line by line, with personal information replaced by labels. */
 fun redactedText(page: OcrPage): String = page.lines.joinToString("\n") { redactText(it.text) }
 
-/** How many pieces of personal information the page holds (text hits, barcodes and faces). */
-fun piiCount(page: OcrPage): Int = page.lines.sumOf { findPii(it.text).size } + page.barcodes.size + page.faces.size
+/** How many pieces of personal information the page holds (text hits and barcodes). */
+fun piiCount(page: OcrPage): Int = page.lines.sumOf { findPii(it.text).size } + page.barcodes.size
 
 /**
  * Rectangles to paint over before the image leaves the phone: every word that is part of a
- * [findPii] hit, every barcode and every face, each grown by `pad` pixels and kept on the image.
+ * [findPii] hit and every barcode, each grown by `pad` pixels and kept on the image.
  */
 fun maskBoxes(page: OcrPage, pad: Int = 6): List<Box> {
     val out = mutableListOf<Box>()
@@ -98,7 +103,6 @@ fun maskBoxes(page: OcrPage, pad: Int = 6): List<Box> {
             start = end + 2
         }
     }
-    out += page.barcodes
-    out += page.faces
+    out += page.barcodes.map { it.box }
     return out.map { it.padded(pad, page.width, page.height) }
 }

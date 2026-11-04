@@ -68,10 +68,10 @@ class RedactTest {
     }
 
     @Test
-    fun `barcodes and faces are always masked`() {
+    fun `barcodes are always masked, kept on the image`() {
         val page = OcrPage(
             width = 100, height = 100, lines = emptyList(),
-            barcodes = listOf(Box(0, 0, 50, 10)), faces = listOf(Box(90, 90, 100, 100)),
+            barcodes = listOf(Barcode(Box(0, 0, 50, 10), "912345678901"), Barcode(Box(90, 90, 100, 100))),
         )
         assertEquals(listOf(Box(0, 0, 55, 15), Box(85, 85, 100, 100)), maskBoxes(page, pad = 5))
         assertEquals(2, piiCount(page))

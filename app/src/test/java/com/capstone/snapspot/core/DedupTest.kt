@@ -40,6 +40,17 @@ class DedupTest {
     }
 
     @Test
+    fun `barcode numbers decide when both coupons have one`() {
+        val saved = coupon(id = "s", brand = "스타벅스", benefit = "아메리카노 Tall", expiresAt = "2026-12-31").copy(barcode = "912345678901")
+        // Two identical gift cards: same brand, benefit and expiry, different barcodes.
+        assertNull(findDuplicateCoupon(listOf(saved), "스타벅스", "아메리카노 Tall", "2026-12-31", "912345678902"))
+        // The same card read differently (benefit text off) is still the same card.
+        assertEquals(saved, findDuplicateCoupon(listOf(saved), "스타벅스", "아메리카노", null, "912345678901"))
+        // Without a number on one side, the old rule applies.
+        assertEquals(saved, findDuplicateCoupon(listOf(saved), "스타벅스", "아메리카노 Tall", "2026-12-31", null))
+    }
+
+    @Test
     fun `a used coupon is not a duplicate`() {
         val used = coupon(benefit = "아메리카노", expiresAt = "2026-12-31", usedAt = 1)
         assertNull(findDuplicateCoupon(listOf(used), "스타벅스", "아메리카노", "2026-12-31"))

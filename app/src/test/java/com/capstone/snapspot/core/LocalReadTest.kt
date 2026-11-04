@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
-private fun page(vararg lines: String, barcodes: List<Box> = emptyList()) =
+private fun page(vararg lines: String, barcodes: List<Barcode> = emptyList()) =
     OcrPage(1080, 2000, lines.mapIndexed { i, t -> ocrLine(t, top = i * 40) }, barcodes)
 
 class LocalReadTest {
@@ -17,7 +17,7 @@ class LocalReadTest {
         "스타벅스", "카페 아메리카노 Tall",
         "9123 4567 8901",
         "유효기간 2026.12.31 까지 D-82", "사용처 전국 스타벅스 매장 (일부 매장 제외)", "주문번호 2610 0412 7731",
-        barcodes = listOf(Box(100, 1200, 980, 1400)),
+        barcodes = listOf(Barcode(Box(100, 1200, 980, 1400), "912345678901")),
     )
 
     @Test
@@ -32,6 +32,23 @@ class LocalReadTest {
         // The barcode number, the order number and the barcode itself.
         assertEquals(3, plan.masked)
         assertFalse(plan.text.contains("9123"))
+        // The number is read from the barcode on the phone and kept, not sent.
+        assertEquals("912345678901", plan.barcode)
+    }
+
+    @Test
+    fun `a barcode with a gift card number marks a gift card even without gift words`() {
+        val plan = planRead(page("스타벅스", "카페 아메리카노 Tall", "2026.12.31", barcodes = listOf(Barcode(Box(0, 0, 10, 10), "9123 4567 8901"))))
+        assertEquals(ReadRoute.LOCAL, plan.route)
+        assertEquals("912345678901", plan.barcode)
+    }
+
+    @Test
+    fun `a QR code holding a link is masked but is not a gift card number`() {
+        val p = page("스타벅스", barcodes = listOf(Barcode(Box(0, 0, 10, 10), "https://example.com/e?id=1")))
+        assertNull(giftCode(p))
+        assertNull(giftCode(page("스타벅스", barcodes = listOf(Barcode(Box(0, 0, 10, 10), null)))))
+        assertEquals(1, planRead(p).masked)
     }
 
     @Test

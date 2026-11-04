@@ -133,6 +133,7 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
                     stage = Stage.LOCATING, imageUri = shot.fileUri, name = ex.name, address = ex.address,
                     category = ex.category, note = ex.note, endDate = ex.endDate.orEmpty(), isPlace = ex.isPlace,
                     kind = ex.kind, brand = ex.brand, benefit = ex.benefit,
+                    barcode = outcome.barcode.takeIf { ex.kind == "coupon" },
                 )
             }
             if (ex.kind == "coupon") {
@@ -224,7 +225,7 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
         val result = if (d.kind == "coupon") {
             val coupon = buildCoupon(d, "c_${now.toString(36)}", now) ?: return SaveResult.NotReady
             if (!allowDuplicate) {
-                findDuplicateCoupon(c.repo.coupons.value, coupon.brand, coupon.benefit, coupon.expiresAt)
+                findDuplicateCoupon(c.repo.coupons.value, coupon.brand, coupon.benefit, coupon.expiresAt, coupon.barcode)
                     ?.let { return SaveResult.DuplicateCoupon(it) }
             }
             c.repo.upsertCoupon(coupon)

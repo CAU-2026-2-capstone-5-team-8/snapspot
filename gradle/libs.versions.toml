@@ -15,7 +15,6 @@ junit = "5.13.4"
 kakaoMap = "2.15.2"
 mlkitTextKorean = "16.0.1"
 mlkitBarcode = "17.3.0"
-mlkitFace = "16.1.7"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -43,7 +42,6 @@ junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 kakao-map = { module = "com.kakao.maps.open:android", version.ref = "kakaoMap" }
 mlkit-text-korean = { module = "com.google.mlkit:text-recognition-korean", version.ref = "mlkitTextKorean" }
 mlkit-barcode = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkitBarcode" }
-mlkit-face = { module = "com.google.mlkit:face-detection", version.ref = "mlkitFace" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
