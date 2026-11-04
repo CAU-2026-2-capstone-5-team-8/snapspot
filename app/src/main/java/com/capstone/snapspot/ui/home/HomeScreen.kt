@@ -324,6 +324,10 @@ fun HomeScreen(
                             Column(Modifier.padding(bottom = SnapSpace.gap), verticalArrangement = Arrangement.spacedBy(SnapSpace.gap)) {
                                 SecondaryButton("코스 변경", { info = null; vm.chooseRoutePlaces(open.bundle.id) }, Modifier.fillMaxWidth())
                                 Text("골라 둔 ${open.routePlaces.size}곳으로 만든 이번 코스예요.", style = SnapType.meta)
+                                if (open.orderedPlaceIds.isNotEmpty()) {
+                                    val names = open.orderedPlaceIds.mapNotNull { id -> open.routePlaces.firstOrNull { it.id == id }?.name }
+                                    Text("장소 순서 · ${names.joinToString(" → ")}", style = SnapType.label, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                         }
                         if (open.couponsLoading) item(key = "bundle-loading") {
@@ -455,6 +459,8 @@ fun HomeScreen(
                 places = places,
                 originalIds = source.bundle.places.map { it.id }.toSet(),
                 initialIds = request.initialIds,
+                initialOrderedPlaceIds = request.initialOrderedPlaceIds,
+                here = here,
                 now = now,
                 onDismiss = vm::dismissRoutePlacePicker,
                 onApply = { ids ->
