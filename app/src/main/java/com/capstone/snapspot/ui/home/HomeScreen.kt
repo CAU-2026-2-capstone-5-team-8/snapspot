@@ -92,6 +92,8 @@ import com.capstone.snapspot.core.needsMapSearch
 import com.capstone.snapspot.core.placeDaysLeft
 import com.capstone.snapspot.core.placeEnded
 import com.capstone.snapspot.core.untilLabel
+import com.capstone.snapspot.core.walkKey
+import com.capstone.snapspot.core.walkMinutes
 import com.capstone.snapspot.ui.components.BigTitle
 import com.capstone.snapspot.ui.components.ConfirmDelete
 import com.capstone.snapspot.ui.components.Dot
@@ -160,6 +162,7 @@ fun HomeScreen(
     val openBundle by vm.openBundle.collectAsState()
     val couponsOn by vm.withCoupons.collectAsState()
     val walks by vm.walks.collectAsState()
+    val goTo by vm.goTo.collectAsState()
     val found by vm.mapBranches.collectAsState()
     val following by vm.following.collectAsState()
     val camera by vm.camera.collectAsState()
@@ -180,10 +183,13 @@ fun HomeScreen(
 
     // Back closes an open route instead of leaving the app.
     BackHandler(enabled = open != null) { open?.let { vm.toggleBundle(it.bundle.id) } }
+    BackHandler(enabled = open == null && goTo != null) { vm.goTo(null) }
     BackHandler(enabled = info != null) { info = null }
     // Row taps and bundle opens move the map: collapse the sheet so the result is visible.
     val showMap: () -> Unit = { scope.launch { sheet.bottomSheetState.partialExpand() } }
 
+    // Opening or closing a route starts its list from the top (its total and switch), not where the home list was.
+    LaunchedEffect(open?.bundle?.id, goTo) { listState.scrollToItem(0) }
     // Tapping a pin scrolls the list to that row.
     LaunchedEffect(selected, tab, open, header) {
         val id = selected ?: return@LaunchedEffect
@@ -196,21 +202,29 @@ fun HomeScreen(
     // An open bundle numbers its stops in walking order; coupon stops are the branch the route picked.
     val stops = open?.let { routeStops(it) }.orEmpty()
     val numberOf = stops.mapIndexedNotNull { i, st -> st.placeId?.let { it to i + 1 } }.toMap()
+    // The way from the user to one place ("동선 보기" on its card): a straight line until TMAP answers.
+    val going = places.firstOrNull { it.id == goTo }?.takeIf { open == null && here != null }
+    val goEnd = going?.let { Coords(it.latitude, it.longitude) }
+    val goWalk = goEnd?.let { walks[walkKey(here, listOf(it))] }
     // Follows the streets once TMAP answers, straight lines until then.
-    val walked = open?.let { walks[it.walkKey]?.line }
+    val walked = open?.let { walks[it.walkKey]?.line } ?: goWalk?.line
     // A place whose end date has passed stays in the list but leaves the map.
     val mapPlaces = places.filter { !placeEnded(it, now) }.map {
         MapPlace(
             // Alert circles stay up while the route is still straight lines; once it follows the streets,
             // only the line and numbered stops show, since the circles would clutter it.
             it.id, Coords(it.latitude, it.longitude), if (walked != null) 0.0 else it.radius.toDouble(), it.imageUri, placeEnded(it, now),
-            it.id == selected, numberOf[it.id], near = it.id in near,
+            it.id == selected || it.id == going?.id, numberOf[it.id], near = it.id in near,
         )
     } + stops.mapIndexedNotNull { i, st ->
         if (st.placeId != null) null
         else MapPlace("route-$i", st.at, 0.0, null, ended = false, selected = false, number = i + 1, couponStop = true, tone = tones[brandKey(st.brand.orEmpty())] ?: 0)
     }
-    val routeLine = if (open == null) emptyList() else walked ?: open.line
+    val routeLine = when {
+        open != null -> walked ?: open.line
+        goEnd != null -> walked ?: listOfNotNull(here, goEnd)
+        else -> emptyList()
+    }
     // Gifticon branches: the alert plan's around the user plus what the map looked up where it was looking,
     // drawn only near the user (while following) or the map's center, the nearest few of each brand.
     val urgentBrands = coupons.filter { it.urgent }.map { brandKey(it.coupon.brand) }.toSet()
@@ -243,7 +257,22 @@ fun HomeScreen(
                         bottom = 96.dp + navBottom + collapsedListPadding(sheetHeight, peek, sheet.bottomSheetState.targetValue == SheetValue.PartiallyExpanded),
                     ),
                 ) {
-                    if (open == null) {
+                    if (open == null && going != null) {
+                        item(key = "go-head") {
+                            val meters = goWalk?.meters ?: distanceMeters(here!!, goEnd!!).toInt()
+                            BigTitle("${going.name}까지", "걸어서 ${goWalk?.minutes ?: walkMinutes(meters.toDouble())}분", Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp))
+                            Text(
+                                if (goWalk != null) "실제 걷는 길로 ${formatDistance(meters.toDouble())}" else "직선 거리 ${formatDistance(meters.toDouble())} · 걷는 길을 찾는 중이에요",
+                                style = SnapType.meta, modifier = Modifier.padding(start = 4.dp, bottom = 12.dp),
+                            )
+                        }
+                        item(key = "go-place") {
+                            PlaceRow(
+                                going, distanceMeters(here!!, goEnd!!), near = going.id in near, ended = placeEnded(going, now), selected = false,
+                                shape = groupShape(0, 1), onClick = { vm.focusOn(going.id); showMap() }, onLongClick = {},
+                            )
+                        }
+                    } else if (open == null) {
                         // Header rows: keep in step with listHeader().
                         item(key = "headline") {
                             val h = homeHeadline(hereName, near.size, places.size, perms.alertsOn)
@@ -374,7 +403,13 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (open == null) {
+                    if (open == null && going != null) {
+                        FloatingChip(Modifier.weight(1f, fill = false), onClick = { vm.goTo(null) }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "길 안내 닫기", tint = SnapColors.ink, modifier = Modifier.size(18.dp))
+                            Gap(6.dp)
+                            Text("${going.name}까지", style = SnapType.title.copy(fontSize = 15.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    } else if (open == null) {
                         FloatingChip(Modifier.weight(1f, fill = false)) { Text("SnapSpot", style = SnapType.logo) }
                     } else {
                         FloatingChip(Modifier.weight(1f, fill = false), onClick = { vm.toggleBundle(open.bundle.id) }) {
@@ -401,7 +436,7 @@ fun HomeScreen(
                 }
                 // After moving the map by hand far from the last search: look up gifticon branches there.
                 val rest = camera
-                if (open == null && !following && rest != null && coupons.any { it.active }) {
+                if (open == null && going == null && !following && rest != null && coupons.any { it.active }) {
                     val chip = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 64.dp)
                     if (rest.second < MAP_MIN_SEARCH_ZOOM) {
                         FloatingChip(chip) { Text("지도를 확대하면 지점을 찾을 수 있어요", style = SnapType.label) }
@@ -415,7 +450,7 @@ fun HomeScreen(
                 }
             }
         }
-        if (open == null) {
+        if (open == null && going == null) {
             Box(
                 Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(16.dp).size(56.dp)
                     .shadow(6.dp, SnapShapes.card).clip(SnapShapes.card).background(SnapColors.ink).clickable(onClick = onAdd),
@@ -426,7 +461,8 @@ fun HomeScreen(
             val bundle = bundleItems.firstOrNull { b -> b.bundle.places.any { it.id == p.id } }
             PlaceCard(
                 p, now,
-                onRoute = bundle?.takeIf { it.bundle.id != openBundle }?.let { b -> { info = null; vm.toggleBundle(b.bundle.id); showMap() } },
+                onGo = here?.let { { info = null; vm.goTo(p.id); showMap() } },
+                onCourse = bundle?.takeIf { it.bundle.id != openBundle }?.let { b -> { info = null; vm.toggleBundle(b.bundle.id); showMap() } },
                 onClose = { info = null },
             )
         }
@@ -448,7 +484,7 @@ private val CARD_DISMISS = 96.dp
  * visible; tapping outside or dragging the card down closes it.
  */
 @Composable
-private fun PlaceCard(p: Place, now: Long, onRoute: (() -> Unit)?, onClose: () -> Unit) {
+private fun PlaceCard(p: Place, now: Long, onGo: (() -> Unit)?, onCourse: (() -> Unit)?, onClose: () -> Unit) {
     val uri = LocalUriHandler.current
     val ended = placeEnded(p, now)
     val dismissPx = with(LocalDensity.current) { CARD_DISMISS.toPx() }
@@ -489,11 +525,13 @@ private fun PlaceCard(p: Place, now: Long, onRoute: (() -> Unit)?, onClose: () -
                     }
                 }
             }
+            // "동선 보기" is the way from here to this place; "묶음 동선 보기" the whole neighborhood course it is in.
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(SnapSpace.gap)) {
                 p.placeUrl?.let { url -> SecondaryButton("카카오맵에서 보기", { runCatching { uri.openUri(url) } }, Modifier.weight(1f)) }
-                if (onRoute != null) PrimaryButton("동선 보기", onRoute, Modifier.weight(1f))
-                else SecondaryButton("닫기", onClose, Modifier.weight(1f))
+                if (onGo != null) PrimaryButton("동선 보기", onGo, Modifier.weight(1f))
+                else if (onCourse == null) SecondaryButton("닫기", onClose, Modifier.weight(1f))
             }
+            if (onCourse != null) SecondaryButton("묶음 동선 보기", onCourse, Modifier.fillMaxWidth())
         }
     }
 }

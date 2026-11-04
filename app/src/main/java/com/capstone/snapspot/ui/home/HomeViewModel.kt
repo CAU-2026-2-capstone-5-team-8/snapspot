@@ -130,6 +130,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _openBundle = MutableStateFlow<String?>(null)
     val openBundle: StateFlow<String?> = _openBundle.asStateFlow()
 
+    /** The place the user asked the way to from where they are (the place card's "동선 보기"). */
+    private val _goTo = MutableStateFlow<String?>(null)
+    val goTo: StateFlow<String?> = _goTo.asStateFlow()
+
     /** Routes solved recently: position updates away from a bundle do not solve it again. */
     private val routeMemo = RouteMemo(32)
 
@@ -200,18 +204,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             combine(_openBundle, bundles) { id, items -> items.firstOrNull { it.bundle.id == id } }
                 .distinctUntilChanged { a, b -> a?.walkKey == b?.walkKey }
-                .collect { item ->
-                    if (item == null) return@collect
-                    val key = item.walkKey
-                    val line = item.line
-                    if (line.size < 2 || key in _walks.value || !walksAsking.add(key)) return@collect
-                    launch {
-                        runCatching { walkPath(c.walk, line) }
-                            .onSuccess { w -> _walks.value = _walks.value + (key to w) }
-                            .onFailure { Log.w("SnapSpot", "walking route failed", it) }
-                        walksAsking.remove(key)
-                    }
-                }
+                .collect { item -> if (item != null) askWalk(item.walkKey, item.line) }
+        }
+        // The way from the user to one place, asked again only when the start moves ~100m.
+        viewModelScope.launch {
+            combine(_goTo, here, c.repo.places) { id, at, list ->
+                val p = list.firstOrNull { it.id == id } ?: return@combine null
+                if (at == null) null else listOf(at, Coords(p.latitude, p.longitude))
+            }.distinctUntilChanged { a, b -> a?.let { walkKey(it[0], it.drop(1)) } == b?.let { walkKey(it[0], it.drop(1)) } }
+                .collect { line -> if (line != null) askWalk(walkKey(line[0], line.drop(1)), line) }
         }
         // Name bundles the first time they show up (the alert path only reads this cache).
         viewModelScope.launch {
@@ -230,8 +231,29 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Asks TMAP for the walk along `line` once; a failure is forgotten so it is asked again next time. */
+    private fun askWalk(key: String, line: List<Coords>) {
+        if (line.size < 2 || key in _walks.value || !walksAsking.add(key)) return
+        viewModelScope.launch {
+            runCatching { walkPath(c.walk, line) }
+                .onSuccess { w -> _walks.value = _walks.value + (key to w) }
+                .onFailure { Log.w("SnapSpot", "walking route failed", it) }
+            walksAsking.remove(key)
+        }
+    }
+
+    /** Shows the way from the user to place `id`, or closes it (null). Closes an open bundle. */
+    fun goTo(id: String?) {
+        _goTo.value = id
+        if (id == null) return
+        _openBundle.value = null
+        _following.value = false
+        _selected.value = id
+    }
+
     fun toggleBundle(id: String) {
         _following.value = false
+        _goTo.value = null
         // The map fits the opened bundle's route into view by itself (SpotMap).
         _openBundle.value = if (_openBundle.value == id) null else id
     }
