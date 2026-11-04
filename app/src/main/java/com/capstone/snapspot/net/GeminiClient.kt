@@ -74,8 +74,8 @@ fun parseExtracted(text: String): Extracted {
 /** Gemini answered with an error status. */
 class GeminiHttpException(val code: Int, body: String) : Exception("Gemini 요청 실패 ($code): ${body.take(200)}")
 
-/** One try waits this long; reads usually take 1 to 2 seconds. */
-const val GEMINI_TIMEOUT_MS = 15_000L
+/** Bounds each attempt, including waiting for slow response headers. */
+const val GEMINI_TIMEOUT_MS = 30_000L
 
 /** Worth one more try: a timeout or dropped connection, rate limiting, or a server error. Not when offline. */
 fun isRetryable(e: Throwable): Boolean = when (e) {
@@ -94,7 +94,10 @@ class GeminiClient(
     timeoutMs: Long = GEMINI_TIMEOUT_MS,
     private val retryDelayMs: Long = 1_000,
 ) {
-    private val client = client.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build()
+    private val client = client.newBuilder()
+        .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+        .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+        .build()
 
     /** Reads a (masked) screenshot image. */
     suspend fun extract(base64Jpeg: String): Extracted = generate(

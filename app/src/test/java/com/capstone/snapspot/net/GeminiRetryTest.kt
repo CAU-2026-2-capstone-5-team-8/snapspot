@@ -39,6 +39,16 @@ class GeminiRetryTest {
     }
 
     @Test
+    fun `waits for headers within the Gemini timeout despite a shorter inherited read timeout`() = runTest {
+        val client = OkHttpClient.Builder().readTimeout(100, TimeUnit.MILLISECONDS).build()
+        gemini = GeminiClient("k", "m", client, server.url("/v1beta").toString(), timeoutMs = 2_000, retryDelayMs = 0)
+        server.enqueue(ok.setHeadersDelay(300, TimeUnit.MILLISECONDS))
+
+        assertEquals("어니언 성수", gemini.extractText("x").name)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun `a slow answer times out and is tried once more`() = runTest {
         server.enqueue(MockResponse().setBodyDelay(2, TimeUnit.SECONDS).setBody("{}"))
         server.enqueue(ok)
