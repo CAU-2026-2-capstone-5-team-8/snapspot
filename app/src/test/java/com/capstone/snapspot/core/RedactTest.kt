@@ -30,6 +30,19 @@ class RedactTest {
     }
 
     @Test
+    fun `emails the recognizer garbled are still emails`() {
+        // Seen on the emulator: ML Kit read hello.onion@gmail.com as "hello.onion@gmailcom".
+        for (e in listOf("hello.onion@gmailcom", "me @ cau.ac.kr", "me@cau,ac,kr", "me@cau. ac.kr")) {
+            assertEquals("문의 [이메일]", redactText("문의 $e"), e)
+        }
+    }
+
+    @Test
+    fun `a handle without a name before it is not an email`() {
+        assertEquals(emptyList<Pii>(), findPii("@onion_seongsu 성수동").map { it.kind })
+    }
+
+    @Test
     fun `long digit runs such as barcode and order numbers are codes`() {
         assertEquals(listOf(Pii.CODE), findPii("9123 4567 8901").map { it.kind })
         assertEquals(listOf(Pii.CODE), findPii("주문번호 2610 0412 7731").map { it.kind })
