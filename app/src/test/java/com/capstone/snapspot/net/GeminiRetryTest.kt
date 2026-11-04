@@ -2,14 +2,19 @@ package com.capstone.snapspot.net
 
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotSame
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import okio.Buffer
+import okio.ForwardingSource
+import okio.buffer
 import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 
@@ -36,6 +41,40 @@ class GeminiRetryTest {
         server.enqueue(ok)
         assertEquals("어니언 성수", gemini.extractText("x").name)
         assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun `waits for headers within the Gemini timeout despite a shorter inherited read timeout`() = runTest {
+        val client = OkHttpClient.Builder().readTimeout(100, TimeUnit.MILLISECONDS).build()
+        gemini = GeminiClient("k", "m", client, server.url("/v1beta").toString(), timeoutMs = 2_000, retryDelayMs = 0)
+        server.enqueue(ok.setHeadersDelay(300, TimeUnit.MILLISECONDS))
+
+        assertEquals("어니언 성수", gemini.extractText("x").name)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `reads the response body off the caller thread`() = runTest {
+        val callerThread = Thread.currentThread()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val response = chain.proceed(chain.request())
+            val original = requireNotNull(response.body)
+            val guarded = object : ForwardingSource(original.source()) {
+                override fun read(sink: Buffer, byteCount: Long): Long {
+                    assertNotSame(callerThread, Thread.currentThread(), "Response body read on caller thread")
+                    return super.read(sink, byteCount)
+                }
+            }.buffer()
+            response.newBuilder().body(object : ResponseBody() {
+                override fun contentType() = original.contentType()
+                override fun contentLength() = original.contentLength()
+                override fun source() = guarded
+            }).build()
+        }.build()
+        gemini = GeminiClient("k", "m", client, server.url("/v1beta").toString(), timeoutMs = 2_000, retryDelayMs = 0)
+        server.enqueue(ok)
+
+        assertEquals("어니언 성수", gemini.extractText("x").name)
     }
 
     @Test

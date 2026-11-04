@@ -2,7 +2,9 @@ package com.capstone.snapspot.net
 
 import com.capstone.snapspot.core.isDate
 import com.capstone.snapspot.core.model.Extracted
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.add
@@ -74,8 +76,8 @@ fun parseExtracted(text: String): Extracted {
 /** Gemini answered with an error status. */
 class GeminiHttpException(val code: Int, body: String) : Exception("Gemini 요청 실패 ($code): ${body.take(200)}")
 
-/** One try waits this long; reads usually take 1 to 2 seconds. */
-const val GEMINI_TIMEOUT_MS = 15_000L
+/** Bounds each attempt, including waiting for slow response headers. */
+const val GEMINI_TIMEOUT_MS = 30_000L
 
 /** Worth one more try: a timeout or dropped connection, rate limiting, or a server error. Not when offline. */
 fun isRetryable(e: Throwable): Boolean = when (e) {
@@ -94,7 +96,10 @@ class GeminiClient(
     timeoutMs: Long = GEMINI_TIMEOUT_MS,
     private val retryDelayMs: Long = 1_000,
 ) {
-    private val client = client.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build()
+    private val client = client.newBuilder()
+        .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+        .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+        .build()
 
     /** Reads a (masked) screenshot image. */
     suspend fun extract(base64Jpeg: String): Extracted = generate(
@@ -142,7 +147,7 @@ class GeminiClient(
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
         val text = client.newCall(req).await().use { res ->
-            val raw = res.body?.string().orEmpty()
+            val raw = withContext(Dispatchers.IO) { res.body?.string().orEmpty() }
             if (!res.isSuccessful) throw GeminiHttpException(res.code, raw)
             val root = json.parseToJsonElement(raw).jsonObject
             root["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
