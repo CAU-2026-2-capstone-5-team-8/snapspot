@@ -19,8 +19,11 @@ import com.capstone.snapspot.core.nearbyBranches
 import com.capstone.snapspot.image.PreparedShot
 import com.capstone.snapspot.image.Screenshots
 import com.capstone.snapspot.location.geocodePlace
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -75,6 +78,8 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
     fun cancel() {
         reads?.cancel()
         reads = null
+        prepared = emptyList()
+        readJobs = emptyList()
         _batch.value = null
     }
 
@@ -111,11 +116,31 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
         reads = viewModelScope.launch {
             // Copy every image first: a shared image's read permission ends when the sender lets go.
             val shots = taken.map { uri -> async { runCatching { Screenshots.prepare(getApplication(), uri) } } }
-            shots.forEachIndexed { i, shot ->
+            prepared = shots
+            readJobs = shots.mapIndexed { i, shot ->
                 launch { permits.withPermit { read(batch, i, shot.await()) } }
             }
         }
         return uris.size - taken.size
+    }
+
+    /** Copies of the current batch's screenshots, and the read of each, by position. */
+    private var prepared: List<Deferred<Result<PreparedShot>>> = emptyList()
+    private var readJobs: List<Job> = emptyList()
+
+    /**
+     * Stops reading the screenshot on screen and opens its form as it is, to be typed in.
+     * Offered when a read takes long; the copied screenshot is still kept with it.
+     */
+    fun typeInstead() {
+        val b = _batch.value ?: return
+        val i = b.index
+        readJobs.getOrNull(i)?.cancel()
+        updateAt(b, i) { if (it.stage == Stage.READY) it else it.copy(stage = Stage.READY) }
+        val shot = prepared.getOrNull(i) ?: return
+        viewModelScope.launch {
+            shot.await().getOrNull()?.let { s -> updateAt(b, i) { it.copy(imageUri = s.fileUri) } }
+        }
     }
 
     /** Updates screenshot `i`, but only while `batch` is still the open one. */
@@ -148,6 +173,7 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            currentCoroutineContext().ensureActive() // stopped on purpose: no error to show
             Log.w("SnapSpot", "screenshot read failed", e)
             updateAt(batch, i) { it.copy(stage = Stage.READY, readError = "스크린샷을 읽지 못했어요\n${readErrorMessage(e)}") }
         }

@@ -77,6 +77,7 @@ import com.capstone.snapspot.ui.theme.SnapColors
 import com.capstone.snapspot.ui.theme.SnapShapes
 import com.capstone.snapspot.ui.theme.SnapSpace
 import com.capstone.snapspot.ui.theme.SnapType
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -126,7 +127,7 @@ fun AddScreen(
             IconTap(Icons.Filled.Close, "닫기", { vm.cancel(); onClose() })
         }
         if (!ready) {
-            Reading(d)
+            Reading(d, key = b.position, onTypeInstead = vm::typeInstead)
         } else {
             Column(
                 Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = SnapSpace.gutter),
@@ -362,9 +363,20 @@ private fun Preview(head: String, body: String?) {
     }
 }
 
-/** The screenshot, with an ink band sweeping over it while it is being read. */
+/** After this long on one screenshot, offer typing it in instead of waiting. */
+private const val SLOW_READ_MS = 5_000L
+
+/**
+ * The screenshot, with an ink band sweeping over it while it is being read. When the read
+ * takes long, offers [onTypeInstead]; `key` restarts that wait for each screenshot.
+ */
 @Composable
-private fun Reading(d: Draft) {
+private fun Reading(d: Draft, key: Any, onTypeInstead: () -> Unit) {
+    var slow by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(key) {
+        delay(SLOW_READ_MS)
+        slow = true
+    }
     val sweep by rememberInfiniteTransition(label = "sweep").animateFloat(
         0f, 1f, infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Restart), label = "y",
     )
@@ -382,6 +394,12 @@ private fun Reading(d: Draft) {
             Step("스크린샷에서 장소 정보 읽기", if (d.stage == Stage.READING) 1 else 2)
             Step(if (d.kind == "coupon") "근처 지점 찾기" else "카카오맵에서 장소 찾기", if (d.stage == Stage.LOCATING) 1 else 0)
             if (d.name.isNotBlank()) Text("찾은 이름: ${d.name}", style = SnapType.meta)
+        }
+        if (slow) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("조금 오래 걸리고 있어요. 기다리거나 직접 입력할 수 있어요.", style = SnapType.meta)
+                SecondaryButton("직접 입력하기", onClick = onTypeInstead, modifier = Modifier.fillMaxWidth())
+            }
         }
     }
 }
