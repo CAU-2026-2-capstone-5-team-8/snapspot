@@ -27,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import kotlin.coroutines.cancellation.CancellationException
 
 /** The on-device step failed, so the screenshot was not sent anywhere. */
 class RedactionFailed(cause: Throwable) : Exception("on-device scan failed", cause)
@@ -55,6 +56,8 @@ class ShotReader(private val gemini: GeminiClient) {
         }
         val page = try {
             scan(bitmap)
+        } catch (e: CancellationException) {
+            throw e // the read was stopped (closed, or typed in instead), not a failed scan
         } catch (e: Exception) {
             throw RedactionFailed(e)
         }

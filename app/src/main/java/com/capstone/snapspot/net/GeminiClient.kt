@@ -2,6 +2,7 @@ package com.capstone.snapspot.net
 
 import com.capstone.snapspot.core.isDate
 import com.capstone.snapspot.core.model.Extracted
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.add
@@ -17,6 +18,11 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
+import java.net.ConnectException
+import java.net.UnknownHostException
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.cancellation.CancellationException
 
 private const val PROMPT = """너는 스마트폰 스크린샷에서 "나중에 가 보고 싶은 장소"나 "프랜차이즈 쿠폰"을 뽑아내는 도우미야.
 이미지(인스타그램 게시물, 지도 앱, 블로그, 팝업스토어·전시 포스터, 기프티콘·모바일 쿠폰 등)를 보고 아래 JSON만 출력해.
@@ -65,13 +71,31 @@ fun parseExtracted(text: String): Extracted {
     )
 }
 
-/** Reads a screenshot with Gemini (structured JSON output). */
+/** Gemini answered with an error status. */
+class GeminiHttpException(val code: Int, body: String) : Exception("Gemini 요청 실패 ($code): ${body.take(200)}")
+
+/** One try waits this long; reads usually take 1 to 2 seconds. */
+const val GEMINI_TIMEOUT_MS = 15_000L
+
+/** Worth one more try: a timeout or dropped connection, rate limiting, or a server error. Not when offline. */
+fun isRetryable(e: Throwable): Boolean = when (e) {
+    is UnknownHostException, is ConnectException -> false
+    is IOException -> true
+    is GeminiHttpException -> e.code == 429 || e.code >= 500
+    else -> false
+}
+
+/** Reads a screenshot with Gemini (structured JSON output). A slow or failed try is tried once more. */
 class GeminiClient(
     private val key: String,
     private val model: String,
-    private val client: OkHttpClient,
+    client: OkHttpClient,
     private val base: String = "https://generativelanguage.googleapis.com/v1beta",
+    timeoutMs: Long = GEMINI_TIMEOUT_MS,
+    private val retryDelayMs: Long = 1_000,
 ) {
+    private val client = client.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build()
+
     /** Reads a (masked) screenshot image. */
     suspend fun extract(base64Jpeg: String): Extracted = generate(
         buildJsonObject { putJsonObject("inline_data") { put("mime_type", "image/jpeg"); put("data", base64Jpeg) } },
@@ -84,6 +108,16 @@ class GeminiClient(
 
     private suspend fun generate(input: JsonObject): Extracted {
         check(key.isNotEmpty()) { "Gemini API 키가 없어요. local.properties의 GEMINI_API_KEY를 설정하세요." }
+        return try {
+            request(input)
+        } catch (e: Exception) {
+            if (e is CancellationException || !isRetryable(e)) throw e
+            delay(retryDelayMs)
+            request(input)
+        }
+    }
+
+    private suspend fun request(input: JsonObject): Extracted {
         val body = buildJsonObject {
             putJsonArray("contents") {
                 add(
@@ -109,7 +143,7 @@ class GeminiClient(
             .build()
         val text = client.newCall(req).await().use { res ->
             val raw = res.body?.string().orEmpty()
-            check(res.isSuccessful) { "Gemini 요청 실패 (${res.code}): ${raw.take(200)}" }
+            if (!res.isSuccessful) throw GeminiHttpException(res.code, raw)
             val root = json.parseToJsonElement(raw).jsonObject
             root["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
                 ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.firstOrNull()?.jsonObject
