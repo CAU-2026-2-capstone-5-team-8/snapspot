@@ -37,7 +37,6 @@ import com.capstone.snapspot.core.nearbyCouponStops
 import com.capstone.snapspot.core.needsMapSearch
 import com.capstone.snapspot.core.routeCouponStops
 import com.capstone.snapspot.core.selectedRoutePlaces
-import com.capstone.snapspot.core.shortestRoute
 import com.capstone.snapspot.core.stopsOf
 import com.capstone.snapspot.core.walkKey
 import com.capstone.snapspot.core.walkMinutes
@@ -85,6 +84,7 @@ data class BundleItem(
     val couponsLoading: Boolean = false,
     val selection: RouteSelection? = null,
     val routeReady: Boolean = false,
+    val orderedPlaceIds: List<String> = emptyList(),
 ) {
     val line: List<Coords> get() = listOfNotNull(start) + route.order.indices.map { i -> stopAt(route.order[i], route.picks[i]) }
     val walkKey: String get() = walkKey(start, route.order.indices.map { i -> stopAt(route.order[i], route.picks[i]) })
@@ -94,7 +94,10 @@ data class BundleItem(
         else coupons[stop - routePlaces.size].branches[pick].let { Coords(it.latitude, it.longitude) }
 }
 
-data class RoutePlaceRequest(val bundleId: String, val initialIds: Set<String>, val token: Long = System.nanoTime())
+data class RoutePlaceRequest(
+    val bundleId: String, val initialIds: Set<String>, val initialOrderedPlaceIds: List<String> = emptyList(),
+    val token: Long = System.nanoTime(),
+)
 
 private data class RouteOptions(val withCoupons: Set<String>, val selection: RouteSelection?, val brands: List<String>, val openBundleId: String?)
 private data class CourseCouponKey(val bundleId: String, val stops: List<Coords>, val brands: List<String>, val edited: Boolean)
@@ -151,6 +154,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     val openBundle: StateFlow<String?> = _openBundle.asStateFlow()
     private val _routePicker = MutableStateFlow<RoutePlaceRequest?>(null)
     val routePicker: StateFlow<RoutePlaceRequest?> = _routePicker.asStateFlow()
+    private var firstLocationRequest: Job? = null
 
     /** Routes solved recently: position updates away from a bundle do not solve it again. */
     private val routeMemo = RouteMemo(32)
@@ -175,6 +179,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             val requested = selection?.let { selectedRoutePlaces(list, it.placeIds, now) }
             val unavailable = requested != null && requested.size < MIN_ROUTE_PLACES
             val places = requested ?: b.places
+            val availableIds = places.map { it.id }.toSet()
+            val orderedIds = selection?.orderedPlaceIds.orEmpty().filter { it in availableIds }.distinct()
+            val orderedStops = orderedIds.map { id -> places.indexOfFirst { it.id == id } }
             val edited = places.map { it.id }.toSet() != b.places.map { it.id }.toSet()
             val start = at?.takeIf { a -> places.any { distanceMeters(a, Coords(it.latitude, it.longitude)) <= 1000 } }
             val withCoupons = b.id in options.withCoupons && options.brands.isNotEmpty()
@@ -185,12 +192,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 coupons.map { cs -> cs.branches.map { Coords(it.latitude, it.longitude) } }
             // Home cards are candidates. Solve only after the user confirms their places.
             val ready = options.openBundleId == b.id && selection != null && !unavailable
-            val route = if (ready) routeMemo.route(stops, start, ::shortestRoute) else RouteResult(emptyList(), emptyList(), 0.0)
+            val route = if (ready) routeMemo.routeOrdered(stops, start, orderedStops) else RouteResult(emptyList(), emptyList(), 0.0)
             BundleItem(
                 b, c.regionNames.cached(b.center) ?: fallbackBundleName(b), coupons, route, start, walkMinutes(route.meters),
                 couponsFailed = (fetched?.failed ?: 0) > 0, routePlaces = places, edited = edited,
                 selectionUnavailable = unavailable, couponsLoading = withCoupons && fetched == null,
-                selection = selection, routeReady = ready,
+                selection = selection, routeReady = ready, orderedPlaceIds = orderedIds,
             )
         }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -322,9 +329,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun chooseRoutePlaces(bundleId: String) {
         val source = bundles.value.firstOrNull { it.bundle.id == bundleId }?.bundle ?: return
-        val initial = _routeSelection.value?.takeIf { it.bundleId == bundleId }?.placeIds
-            ?: source.places.map { it.id }.toSet()
-        _routePicker.value = RoutePlaceRequest(bundleId, initial)
+        val selection = _routeSelection.value?.takeIf { it.bundleId == bundleId }
+        val initial = selection?.placeIds ?: source.places.map { it.id }.toSet()
+        _routePicker.value = RoutePlaceRequest(bundleId, initial, selection?.orderedPlaceIds.orEmpty())
+        // A fresh install or GPS-only device may not have a cached/balanced position yet.
+        if (here.value == null && _perms.value.fg && firstLocationRequest?.isActive != true) {
+            firstLocationRequest = viewModelScope.launch { c.location.current() }
+        }
     }
 
     fun dismissRoutePlacePicker() {
@@ -332,13 +343,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Editing affects this course only; the source bundle still drives neighborhood alerts. */
-    fun applyRoutePlaces(ids: Set<String>): Boolean {
+    fun applyRoutePlaces(ids: List<String>): Boolean {
         val request = _routePicker.value ?: return false
         val source = bundles.value.firstOrNull { it.bundle.id == request.bundleId }?.bundle ?: return false
-        val places = selectedRoutePlaces(c.repo.places.value, ids, System.currentTimeMillis())
+        val places = selectedRoutePlaces(c.repo.places.value, ids.toSet(), System.currentTimeMillis())
         if (places.size < MIN_ROUTE_PLACES) return false
         val selected = places.map { it.id }.toSet()
-        _routeSelection.value = RouteSelection(source.id, selected)
+        val order = ids.distinct().filter { it in selected }
+        _routeSelection.value = RouteSelection(source.id, selected, order)
         _following.value = false
         _selected.value = null
         _openBundle.value = source.id

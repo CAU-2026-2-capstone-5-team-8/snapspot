@@ -37,7 +37,7 @@ fun walkMinutes(meters: Double): Int = ceil(meters * DETOUR_FACTOR / WALK_M_PER_
 fun stopsOf(points: List<Coords>): List<Stop> = points.map { listOf(it) }
 
 /** Options flattened to node ids; node n is the start when there is one. */
-private class Graph(stops: List<Stop>, start: Coords?) {
+private class Graph(stops: List<Stop>, start: Coords?, private val orderedStops: List<Int> = emptyList()) {
     val g = stops.size
     val offset = IntArray(g + 1).also { for (i in 0 until g) it[i + 1] = it[i] + stops[i].size }
     val n = offset[g]
@@ -45,17 +45,32 @@ private class Graph(stops: List<Stop>, start: Coords?) {
     private val all = stops.flatten() + listOfNotNull(start)
     private val d = Array(all.size) { i -> DoubleArray(all.size) { j -> distanceMeters(all[i], all[j]) } }
     val hasStart = start != null
+    private val rank = IntArray(g) { -1 }.also { ranks -> orderedStops.forEachIndexed { i, stop -> ranks[stop] = i } }
     operator fun get(i: Int, j: Int) = d[i][j]
     fun lead(node: Int) = if (hasStart) d[n][node] else 0.0
     fun length(nodes: List<Int>): Double =
         if (nodes.isEmpty()) 0.0 else lead(nodes[0]) + nodes.zipWithNext().sumOf { (a, b) -> d[a][b] }
     fun result(nodes: List<Int>) = RouteResult(nodes.map { stopOf[it] }, nodes.map { it - offset[stopOf[it]] }, length(nodes))
     fun nodesOf(stop: Int) = offset[stop] until offset[stop + 1]
+    fun canVisit(stop: Int, visited: BooleanArray): Boolean = rank[stop] <= 0 || visited[orderedStops[rank[stop] - 1]]
+    fun canVisit(stop: Int, mask: Int): Boolean = rank[stop] <= 0 || mask and (1 shl orderedStops[rank[stop] - 1]) != 0
+    fun validOrder(nodes: List<Int>): Boolean {
+        if (orderedStops.isEmpty()) return true
+        var last = -1
+        for (node in nodes) {
+            val next = rank[stopOf[node]]
+            if (next >= 0) {
+                if (next <= last) return false
+                last = next
+            }
+        }
+        return true
+    }
 }
 
-fun bruteForceRoute(stops: List<Stop>, start: Coords?): RouteResult {
+fun bruteForceRoute(stops: List<Stop>, start: Coords?, orderedStops: List<Int> = emptyList()): RouteResult {
     if (stops.isEmpty()) return RouteResult(emptyList(), emptyList(), 0.0)
-    val gr = Graph(stops, start)
+    val gr = Graph(stops, start, orderedStops)
     var best: List<Int> = emptyList()
     var bestLen = Double.MAX_VALUE
     val path = mutableListOf<Int>()
@@ -68,7 +83,7 @@ fun bruteForceRoute(stops: List<Stop>, start: Coords?): RouteResult {
             return
         }
         for (s in 0 until gr.g) {
-            if (used[s]) continue
+            if (used[s] || !gr.canVisit(s, used)) continue
             used[s] = true
             for (v in gr.nodesOf(s)) {
                 val add = if (path.isEmpty()) gr.lead(v) else gr[path.last(), v]
@@ -83,22 +98,22 @@ fun bruteForceRoute(stops: List<Stop>, start: Coords?): RouteResult {
     return gr.result(best)
 }
 
-fun exactRoute(stops: List<Stop>, start: Coords?): RouteResult {
+fun exactRoute(stops: List<Stop>, start: Coords?, orderedStops: List<Int> = emptyList()): RouteResult {
     if (stops.isEmpty()) return RouteResult(emptyList(), emptyList(), 0.0)
-    val gr = Graph(stops, start)
+    val gr = Graph(stops, start, orderedStops)
     val n = gr.n
     val full = (1 shl gr.g) - 1
     // cost[mask * n + v]: shortest path through exactly the stops in `mask`, ending at option v.
     val cost = DoubleArray((full + 1) * n) { Double.MAX_VALUE }
     val prev = IntArray((full + 1) * n) { -1 }
-    for (v in 0 until n) cost[(1 shl gr.stopOf[v]) * n + v] = gr.lead(v)
+    for (v in 0 until n) if (gr.canVisit(gr.stopOf[v], 0)) cost[(1 shl gr.stopOf[v]) * n + v] = gr.lead(v)
     for (mask in 1..full) {
         for (v in 0 until n) {
             val here = cost[mask * n + v]
             if (here == Double.MAX_VALUE) continue
             for (u in 0 until n) {
                 val bit = 1 shl gr.stopOf[u]
-                if (mask and bit != 0) continue
+                if (mask and bit != 0 || !gr.canVisit(gr.stopOf[u], mask)) continue
                 val m2 = mask or bit
                 val c = here + gr[v, u]
                 if (c < cost[m2 * n + u]) {
@@ -122,14 +137,15 @@ fun exactRoute(stops: List<Stop>, start: Coords?): RouteResult {
 
 fun heuristicRoute(
     stops: List<Stop>, start: Coords?, twoOpt: Boolean = true, orOpt: Boolean = true, repick: Boolean = true, insertion: Boolean = true,
+    orderedStops: List<Int> = emptyList(),
 ): RouteResult {
     if (stops.isEmpty()) return RouteResult(emptyList(), emptyList(), 0.0)
-    val gr = Graph(stops, start)
+    val gr = Graph(stops, start, orderedStops)
     // With a start, two runs from it (nearest neighbor and cheapest insertion). Without, a nearest-neighbor run
     // from every stop, each starting at that stop's first option (the improvement moves re-pick options anyway).
     val seeds: List<() -> MutableList<Int>> =
         if (start != null) listOfNotNull({ nearestNeighbor(gr, -1) }, if (insertion) { { cheapestInsertion(gr) } } else null)
-        else (0 until gr.g).map { s -> { nearestNeighbor(gr, gr.offset[s]) } }
+        else (0 until gr.g).filter { gr.canVisit(it, BooleanArray(gr.g)) }.map { s -> { nearestNeighbor(gr, gr.offset[s]) } }
     var best: List<Int> = emptyList()
     var bestLen = Double.MAX_VALUE
     for (seed in seeds) {
@@ -153,7 +169,7 @@ private fun nearestNeighbor(gr: Graph, first: Int): MutableList<Int> {
         visited[gr.stopOf[first]] = true
     }
     while (nodes.size < gr.g) {
-        val next = (0 until gr.n).filter { !visited[gr.stopOf[it]] }
+        val next = (0 until gr.n).filter { !visited[gr.stopOf[it]] && gr.canVisit(gr.stopOf[it], visited) }
             .minBy { if (nodes.isEmpty()) gr.lead(it) else gr[nodes.last(), it] }
         nodes += next
         visited[gr.stopOf[next]] = true
@@ -174,7 +190,7 @@ private fun cheapestInsertion(gr: Graph): MutableList<Int> {
         var bestLen = Double.MAX_VALUE
         for (u in gr.nodesOf(s)) for (pos in 0..nodes.size) {
             nodes.add(pos, u)
-            val l = gr.length(nodes)
+            val l = if (gr.validOrder(nodes)) gr.length(nodes) else Double.MAX_VALUE
             if (l < bestLen) {
                 bestLen = l
                 bestNode = u
@@ -198,7 +214,7 @@ private fun improve(gr: Graph, nodes: MutableList<Int>, twoOpt: Boolean, orOpt: 
             for (i in lo until nodes.size - 1) for (k in i + 1 until nodes.size) {
                 val before = gr.length(nodes)
                 nodes.subList(i, k + 1).reverse()
-                if (gr.length(nodes) < before - 1e-9) improved = true else nodes.subList(i, k + 1).reverse()
+                if (gr.validOrder(nodes) && gr.length(nodes) < before - 1e-9) improved = true else nodes.subList(i, k + 1).reverse()
             }
         }
         if (orOpt) {
@@ -216,7 +232,7 @@ private fun improve(gr: Graph, nodes: MutableList<Int>, twoOpt: Boolean, orOpt: 
                     var bestLen = before - 1e-9
                     for (v in variants) for (pos in lo..nodes.size) {
                         nodes.addAll(pos, v)
-                        val l = gr.length(nodes)
+                        val l = if (gr.validOrder(nodes)) gr.length(nodes) else Double.MAX_VALUE
                         if (l < bestLen) {
                             bestLen = l
                             bestPos = pos
@@ -290,3 +306,43 @@ fun lowerBound(stops: List<Stop>, start: Coords?): Double {
 
 fun shortestRoute(stops: List<Stop>, start: Coords?): RouteResult =
     if (stops.size <= EXACT_MAX) exactRoute(stops, start) else heuristicRoute(stops, start)
+
+/**
+ * Fix a saved place (a single-option stop) before every other stop, including coupons.
+ * Solve the remaining course from that place and map its indices back to the original input.
+ * The distance from the user's start to the fixed place is included exactly once.
+ */
+fun routeWithFirstPlace(
+    stops: List<Stop>, start: Coords?, firstStop: Int?,
+    solve: (List<Stop>, Coords?) -> RouteResult = ::shortestRoute,
+): RouteResult {
+    if (firstStop == null) return solve(stops, start)
+    require(firstStop in stops.indices && stops[firstStop].size == 1) { "The first stop must be a saved place" }
+    val first = stops[firstStop].single()
+    val remaining = stops.indices.filter { it != firstStop }
+    val tail = solve(remaining.map { stops[it] }, first)
+    return RouteResult(
+        listOf(firstStop) + tail.order.map { remaining[it] },
+        listOf(0) + tail.picks,
+        (start?.let { distanceMeters(it, first) } ?: 0.0) + tail.meters,
+    )
+}
+
+/** Keep the first place first and all chosen places in order; coupon stops may fit between them. */
+fun routeWithPlaceOrder(stops: List<Stop>, start: Coords?, orderedPlaces: List<Int>): RouteResult {
+    require(orderedPlaces.distinct().size == orderedPlaces.size && orderedPlaces.all { it in stops.indices && stops[it].size == 1 }) {
+        "Ordered stops must be distinct saved places"
+    }
+    if (orderedPlaces.isEmpty()) return shortestRoute(stops, start)
+    val firstStop = orderedPlaces.first()
+    val first = stops[firstStop].single()
+    val remaining = stops.indices.filter { it != firstStop }
+    val tailStops = remaining.map { stops[it] }
+    val tailOrder = orderedPlaces.drop(1).map { remaining.indexOf(it) }
+    val tail = if (tailStops.size <= EXACT_MAX) exactRoute(tailStops, first, tailOrder)
+        else heuristicRoute(tailStops, first, orderedStops = tailOrder)
+    return RouteResult(
+        listOf(firstStop) + tail.order.map { remaining[it] }, listOf(0) + tail.picks,
+        (start?.let { distanceMeters(it, first) } ?: 0.0) + tail.meters,
+    )
+}
