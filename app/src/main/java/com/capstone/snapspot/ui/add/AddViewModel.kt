@@ -150,6 +150,8 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun read(batch: Batch, i: Int, prepared: Result<PreparedShot>) {
         try {
             val shot = prepared.getOrThrow()
+            // Keep the durable copy even if reading fails: the camera original is already gone.
+            updateAt(batch, i) { it.copy(imageUri = shot.fileUri) }
             val outcome = c.reader.read(shot)
             Log.i("SnapSpot", "screenshot read: route=${outcome.route} masked=${outcome.masked}")
             val ex = outcome.extracted
