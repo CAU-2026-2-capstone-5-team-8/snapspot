@@ -35,7 +35,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.LocationSearching
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
@@ -92,6 +91,7 @@ import com.capstone.snapspot.core.needsMapSearch
 import com.capstone.snapspot.core.placeDaysLeft
 import com.capstone.snapspot.core.placeEnded
 import com.capstone.snapspot.core.untilLabel
+import com.capstone.snapspot.ui.add.PhotoSourceFab
 import com.capstone.snapspot.ui.components.BigTitle
 import com.capstone.snapspot.ui.components.ConfirmDelete
 import com.capstone.snapspot.ui.components.Dot
@@ -142,7 +142,8 @@ private fun groupShape(i: Int, n: Int): Shape {
 @Composable
 fun HomeScreen(
     vm: HomeViewModel,
-    onAdd: () -> Unit,
+    onCamera: () -> Unit,
+    onGallery: () -> Unit,
     onStatus: () -> Unit,
     onCoupon: (String) -> Unit,
     onAskPermissions: () -> Unit,
@@ -435,11 +436,7 @@ fun HomeScreen(
             }
         }
         if (openBundle == null) {
-            Box(
-                Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(16.dp).size(56.dp)
-                    .shadow(6.dp, SnapShapes.card).clip(SnapShapes.card).background(SnapColors.ink).clickable(onClick = onAdd),
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Add, contentDescription = "스크린샷 추가", tint = SnapColors.lime, modifier = Modifier.size(28.dp)) }
+            PhotoSourceFab(onCamera = onCamera, onGallery = onGallery)
         }
         places.firstOrNull { it.id == info }?.let { p ->
             val bundle = bundleItems.firstOrNull { b -> b.bundle.places.any { it.id == p.id } }

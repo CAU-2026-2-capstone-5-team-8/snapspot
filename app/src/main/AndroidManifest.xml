@@ -41,6 +41,16 @@
             </intent-filter>
         </activity>
 
+        <provider
+            android:name=".image.CaptureFileProvider"
+            android:authorities="${applicationId}.camera"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/camera_paths" />
+        </provider>
+
         <receiver
             android:name=".geofence.GeofenceReceiver"
             android:exported="false" />

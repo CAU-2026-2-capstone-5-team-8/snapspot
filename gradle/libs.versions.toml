@@ -8,6 +8,7 @@ navigation = "2.9.5"
 work = "2.10.5"
 playLocation = "21.3.0"
 coreKtx = "1.17.0"
+exifInterface = "1.4.2"
 okhttp = "4.12.0"
 serialization = "1.9.0"
 coroutines = "1.10.2"
@@ -18,6 +19,7 @@ mlkitBarcode = "17.3.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-exifinterface = { module = "androidx.exifinterface:exifinterface", version.ref = "exifInterface" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }

@@ -1,6 +1,7 @@
 package com.capstone.snapspot.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -32,6 +33,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.capstone.snapspot.image.CameraPhotos
 import com.capstone.snapspot.ui.add.AddScreen
 import com.capstone.snapspot.ui.add.AddViewModel
 import com.capstone.snapspot.ui.add.MAX_BATCH
@@ -56,6 +58,8 @@ fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit, shared: List<Uri>
     var explainBackground by remember { mutableStateOf(false) }
     var missingKey by remember { mutableStateOf(false) }
     var askedOnce by rememberSaveable { mutableStateOf(false) }
+    // The camera can recreate this activity or process while it is in the foreground.
+    var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Re-check permissions and reload data written by background work whenever the app comes back;
     // stop following the position while it is out of sight.
@@ -105,6 +109,7 @@ fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit, shared: List<Uri>
     fun addScreenshots(uris: List<Uri>) {
         if (uris.isEmpty()) return
         if (!add.hasGeminiKey()) {
+            uris.forEach { CameraPhotos.discard(ctx, it) }
             missingKey = true
             return
         }
@@ -115,6 +120,28 @@ fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit, shared: List<Uri>
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_BATCH)) { uris ->
         addScreenshots(uris)
+    }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+        val uri = cameraUri?.let(Uri::parse)
+        cameraUri = null
+        if (uri != null) {
+            if (saved) addScreenshots(listOf(uri)) else CameraPhotos.discard(ctx, uri)
+        }
+    }
+
+    fun takePhoto() {
+        if (cameraUri != null) return
+        try {
+            val uri = CameraPhotos.create(ctx)
+            cameraUri = uri.toString()
+            camera.launch(uri)
+        } catch (e: Exception) {
+            cameraUri?.let { CameraPhotos.discard(ctx, Uri.parse(it)) }
+            cameraUri = null
+            val message = if (e is ActivityNotFoundException) "카메라 앱을 찾을 수 없어요. 갤러리에서 사진을 골라 주세요."
+                else "카메라를 열지 못했어요. 잠시 뒤 다시 시도해 주세요."
+            Toast.makeText(ctx, message, Toast.LENGTH_LONG).show()
+        }
     }
 
     LaunchedEffect(shared) {
@@ -144,7 +171,10 @@ fun SnapSpotNav(deepLink: Uri?, onDeepLinkHandled: () -> Unit, shared: List<Uri>
         composable("home") {
             HomeScreen(
                 vm = home,
-                onAdd = {
+                onCamera = {
+                    if (!add.hasGeminiKey()) missingKey = true else takePhoto()
+                },
+                onGallery = {
                     if (!add.hasGeminiKey()) missingKey = true
                     else picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 },
