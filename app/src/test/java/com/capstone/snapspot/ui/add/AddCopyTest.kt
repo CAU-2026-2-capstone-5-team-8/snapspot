@@ -25,14 +25,14 @@ class AddCopyTest {
     @Test
     fun `kicker names where the details came from`() {
         assertEquals("기프티콘에서 찾았어요", foundKicker("coupon", isPlace = false))
-        assertEquals("스크린샷에서 찾았어요", foundKicker("place", isPlace = true))
+        assertEquals("사진에서 찾았어요", foundKicker("place", isPlace = true))
         assertEquals("장소를 찾기 어려웠어요", foundKicker("place", isPlace = false))
     }
 
     @Test
     fun `read errors become plain Korean, never the raw exception`() {
-        assertEquals("이 이미지를 열 수 없어요. 갤러리에서 다시 골라 주세요.", readErrorMessage(SecurityException("com.capstone.snapspot has no access to content://…")))
-        assertEquals("이 이미지를 열 수 없어요. 갤러리에서 다시 골라 주세요.", readErrorMessage(FileNotFoundException("x")))
+        assertEquals("이 사진을 열 수 없어요. 다시 찍거나 갤러리에서 골라 주세요.", readErrorMessage(SecurityException("com.capstone.snapspot has no access to content://…")))
+        assertEquals("이 사진을 열 수 없어요. 다시 찍거나 갤러리에서 골라 주세요.", readErrorMessage(FileNotFoundException("x")))
         assertEquals("인터넷 연결을 확인해 주세요.", readErrorMessage(UnknownHostException("generativelanguage.googleapis.com")))
         assertEquals("응답이 너무 늦어요. 잠시 뒤 다시 해 보거나 직접 입력해 주세요.", readErrorMessage(SocketTimeoutException("timeout")))
         assertEquals("잠시 뒤 다시 해 보거나 직접 입력해 주세요.", readErrorMessage(IllegalStateException("Gemini 요청 실패 (500): …")))

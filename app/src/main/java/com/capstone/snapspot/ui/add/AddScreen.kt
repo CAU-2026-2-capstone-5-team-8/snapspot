@@ -385,13 +385,13 @@ private fun Reading(d: Draft, key: Any, onTypeInstead: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        BigTitle(null, "스크린샷 읽는 중", Modifier.fillMaxWidth())
+        BigTitle(null, "사진 읽는 중", Modifier.fillMaxWidth())
         BoxWithConstraints(Modifier.fillMaxWidth(0.62f).aspectRatio(9f / 16f).clip(SnapShapes.card)) {
             Shot(d.imageUri, maxWidth, maxHeight, shape = RectangleShape)
             Box(Modifier.fillMaxWidth().height(40.dp).offset(y = (maxHeight + 40.dp) * sweep - 40.dp).background(SnapColors.ink.copy(alpha = 0.14f)))
         }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Step("스크린샷에서 장소 정보 읽기", if (d.stage == Stage.READING) 1 else 2)
+            Step("사진에서 장소 정보 읽기", if (d.stage == Stage.READING) 1 else 2)
             Step(if (d.kind == "coupon") "근처 지점 찾기" else "카카오맵에서 장소 찾기", if (d.stage == Stage.LOCATING) 1 else 0)
             if (d.name.isNotBlank()) Text("찾은 이름: ${d.name}", style = SnapType.meta)
         }

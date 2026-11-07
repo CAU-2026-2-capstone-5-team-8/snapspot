@@ -175,7 +175,7 @@ class AddViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: Exception) {
             currentCoroutineContext().ensureActive() // stopped on purpose: no error to show
             Log.w("SnapSpot", "screenshot read failed", e)
-            updateAt(batch, i) { it.copy(stage = Stage.READY, readError = "스크린샷을 읽지 못했어요\n${readErrorMessage(e)}") }
+            updateAt(batch, i) { it.copy(stage = Stage.READY, readError = "사진을 읽지 못했어요\n${readErrorMessage(e)}") }
         }
     }
 
