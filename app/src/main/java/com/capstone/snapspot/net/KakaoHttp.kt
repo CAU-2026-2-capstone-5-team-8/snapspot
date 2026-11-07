@@ -24,6 +24,9 @@ class KakaoHttp(
     override suspend fun keyword(params: Map<String, String>): List<KakaoDoc> =
         get("keyword", params, KakaoDoc.serializer())
 
+    override suspend fun category(params: Map<String, String>): List<KakaoDoc> =
+        get("category", params, KakaoDoc.serializer())
+
     override suspend fun address(query: String): List<AddressDoc> =
         get("address", mapOf("query" to query, "size" to "1"), AddressDoc.serializer())
 

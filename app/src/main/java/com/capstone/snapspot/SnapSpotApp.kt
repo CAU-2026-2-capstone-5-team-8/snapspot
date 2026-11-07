@@ -3,6 +3,7 @@ package com.capstone.snapspot
 import android.app.Application
 import android.content.Context
 import com.capstone.snapspot.core.fallbackBundleName
+import com.capstone.snapspot.data.EmbedCache
 import com.capstone.snapspot.data.FileBranchCache
 import com.capstone.snapspot.data.PendingStore
 import com.capstone.snapspot.data.RegionNames
@@ -34,6 +35,8 @@ class AppContainer(ctx: Context) {
     val branchCache = FileBranchCache(dir)
     val pending = PendingStore(dir)
     val regionNames = RegionNames(dir)
+    /** Place names already embedded for taste suggestions, so each is sent to Gemini once. */
+    val embeddings = EmbedCache(dir, fetch = { gemini.embed(it) })
     /** Set by the home screen's lifecycle; read by [AlertService]. */
     @Volatile var onScreen = false
     val alerts = AlertService(repo, AndroidNotifier(ctx), onScreen = { onScreen }, bundleName = { b -> regionNames.cached(b.center) ?: fallbackBundleName(b) })

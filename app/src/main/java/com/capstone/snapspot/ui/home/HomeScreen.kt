@@ -87,6 +87,7 @@ import com.capstone.snapspot.core.formatDistance
 import com.capstone.snapspot.core.limitBranches
 import com.capstone.snapspot.core.model.Coupon
 import com.capstone.snapspot.core.model.Place
+import com.capstone.snapspot.core.Suggestion
 import com.capstone.snapspot.core.needsMapSearch
 import com.capstone.snapspot.core.placeDaysLeft
 import com.capstone.snapspot.core.placeEnded
@@ -167,6 +168,9 @@ fun HomeScreen(
     val following by vm.following.collectAsState()
     val camera by vm.camera.collectAsState()
     val searchAt by vm.mapSearchAt.collectAsState()
+    val suggestions by vm.suggestions.collectAsState()
+    // The suggestion whose card is up, after its row was tapped.
+    var suggested by remember { mutableStateOf<Suggestion?>(null) }
     val open = course
     var tab by rememberSaveable { mutableStateOf(Tab.PLACES) }
     var deletingPlace by remember { mutableStateOf<Place?>(null) }
@@ -184,6 +188,7 @@ fun HomeScreen(
     // Back closes an open route instead of leaving the app.
     BackHandler(enabled = openBundle != null) { vm.closeRoute() }
     BackHandler(enabled = info != null) { info = null }
+    BackHandler(enabled = suggested != null) { suggested = null }
     // Row taps and bundle opens move the map: collapse the sheet so the result is visible.
     val showMap: () -> Unit = { scope.launch { sheet.bottomSheetState.partialExpand() } }
 
@@ -298,6 +303,14 @@ fun HomeScreen(
                                     ended = placeEnded(p, now), selected = p.id == selected, shape = groupShape(i, places.size),
                                     onClick = { vm.focusOn(p.id); showMap() }, onLongClick = { deletingPlace = p },
                                 )
+                            }
+                            if (suggestions.isNotEmpty()) {
+                                item(key = "taste-head") {
+                                    Text(TASTE_TITLE, style = SnapType.title.copy(fontSize = 15.sp), modifier = Modifier.padding(start = 4.dp, top = SnapSpace.gutter, bottom = SnapSpace.gap))
+                                }
+                                itemsIndexed(suggestions, key = { _, sg -> "taste-${sg.kakaoId}" }) { i, sg ->
+                                    SuggestionRow(sg, groupShape(i, suggestions.size)) { suggested = sg }
+                                }
                             }
                         } else {
                             if (coupons.isEmpty()) item(key = "empty") { Empty("저장한 기프티콘이 없어요", "기프티콘 스크린샷을 넣으면 그 브랜드 지점 근처에서 알려 드려요.") }
@@ -469,6 +482,10 @@ fun HomeScreen(
         }
     }
 
+    suggested?.let { sg ->
+        SuggestionCard(sg, onSave = { vm.saveSuggestion(sg); suggested = null }, onClose = { suggested = null })
+    }
+
     deletingPlace?.let { p ->
         ConfirmDelete("${p.name} 삭제", "이 장소의 근처 알림도 함께 꺼져요.", onConfirm = { vm.deletePlace(p); deletingPlace = null }, onDismiss = { deletingPlace = null })
     }
@@ -530,6 +547,50 @@ private fun PlaceCard(p: Place, now: Long, onRoute: (() -> Unit)?, onClose: () -
                 p.placeUrl?.let { url -> SecondaryButton("카카오맵에서 보기", { runCatching { uri.openUri(url) } }, Modifier.weight(1f)) }
                 if (onRoute != null) PrimaryButton("코스 만들기", onRoute, Modifier.weight(1f))
                 else SecondaryButton("닫기", onClose, Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SuggestionRow(s: Suggestion, shape: Shape, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(shape).background(SnapColors.surface).clickable(onClick = onClick)
+            .padding(horizontal = SnapSpace.card, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(s.name, style = SnapType.title.copy(fontSize = 15.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(suggestionMeta(s), style = SnapType.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(formatDistance(s.meters), style = SnapType.label)
+    }
+}
+
+/** A suggestion's card: what it is and where, with saving it as a place. Tapping outside closes it. */
+@Composable
+private fun SuggestionCard(s: Suggestion, onSave: () -> Unit, onClose: () -> Unit) {
+    val uri = LocalUriHandler.current
+    Box(
+        Modifier.fillMaxSize().background(SnapColors.ink.copy(alpha = 0.15f)).clickable(onClickLabel = "닫기", onClick = onClose),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Column(
+            Modifier.shadow(8.dp, SnapShapes.sheet).fillMaxWidth().clip(SnapShapes.sheet).background(SnapColors.surface)
+                .clickable(enabled = false, onClick = {}).navigationBarsPadding().padding(start = SnapSpace.gutter, end = SnapSpace.gutter, bottom = SnapSpace.gutter),
+            verticalArrangement = Arrangement.spacedBy(SnapSpace.gutter),
+        ) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { SheetHandle() }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(s.name, style = SnapType.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(suggestionMeta(s), style = SnapType.label)
+                if (s.address.isNotBlank()) Text(s.address, style = SnapType.body.copy(fontSize = 14.sp, color = SnapColors.ink2))
+                Text(TASTE_WHY, style = SnapType.meta)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(SnapSpace.gap)) {
+                s.placeUrl?.let { url -> SecondaryButton("카카오맵에서 보기", { runCatching { uri.openUri(url) } }, Modifier.weight(1f)) }
+                PrimaryButton("저장하기", onSave, Modifier.weight(1f))
             }
         }
     }

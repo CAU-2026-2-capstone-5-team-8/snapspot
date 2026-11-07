@@ -7,6 +7,9 @@ interface KakaoApi {
     /** GET /keyword.json with these query parameters → documents. Throws [KakaoException] on HTTP errors. */
     suspend fun keyword(params: Map<String, String>): List<KakaoDoc>
 
+    /** GET /category.json (category_group_code, x, y, radius, …) → documents. Only the app's HTTP client needs it. */
+    suspend fun category(params: Map<String, String>): List<KakaoDoc> = emptyList()
+
     /** GET /address.json?query=…&size=1 → documents. */
     suspend fun address(query: String): List<AddressDoc>
 }

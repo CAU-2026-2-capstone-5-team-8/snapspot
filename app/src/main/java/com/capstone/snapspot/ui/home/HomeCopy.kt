@@ -3,6 +3,7 @@ package com.capstone.snapspot.ui.home
 import com.capstone.snapspot.core.Coords
 import com.capstone.snapspot.core.distanceMeters
 import com.capstone.snapspot.core.formatDistance
+import com.capstone.snapspot.core.Suggestion
 import com.capstone.snapspot.core.model.Place
 import com.capstone.snapspot.core.placeEnded
 import com.capstone.snapspot.core.untilLabel
@@ -62,3 +63,12 @@ fun bundleTitle(name: String): String = if (name.endsWith("근처")) name else "
 
 /** Rows above the first place in the home list: headline, permission notice, bundle cards, tabs. */
 fun listHeader(alertsOn: Boolean, bundles: Boolean): Int = 2 + (if (alertsOn) 0 else 1) + (if (bundles) 1 else 0)
+
+/** Above the suggestions in the places tab. */
+const val TASTE_TITLE = "저장한 곳과 비슷한 근처 장소"
+
+/** On a suggestion's card: why it showed up. */
+const val TASTE_WHY = "저장한 곳들과 이름·분류가 비슷해서 골랐어요. 저장하면 근처를 지날 때 알려 드려요."
+
+/** A suggestion's second line: its category ("디저트카페"), never a score. */
+fun suggestionMeta(s: Suggestion): String = s.category.ifBlank { "장소" }

@@ -10,6 +10,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.float
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -79,6 +80,12 @@ class GeminiHttpException(val code: Int, body: String) : Exception("Gemini 요�
 /** Bounds each attempt, including waiting for slow response headers. */
 const val GEMINI_TIMEOUT_MS = 30_000L
 
+/** Embedding model for taste (core/Taste.kt); compared in docs/taste.md. */
+const val GEMINI_EMBED_MODEL = "gemini-embedding-2"
+
+/** The API takes at most 100 texts per batchEmbedContents call. */
+const val EMBED_BATCH = 100
+
 /** Worth one more try: a timeout or dropped connection, rate limiting, or a server error. Not when offline. */
 fun isRetryable(e: Throwable): Boolean = when (e) {
     is UnknownHostException, is ConnectException -> false
@@ -95,11 +102,60 @@ class GeminiClient(
     private val base: String = "https://generativelanguage.googleapis.com/v1beta",
     timeoutMs: Long = GEMINI_TIMEOUT_MS,
     private val retryDelayMs: Long = 1_000,
+    private val embedModel: String = GEMINI_EMBED_MODEL,
 ) {
     private val client = client.newBuilder()
         .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
         .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
         .build()
+
+    /**
+     * One embedding vector per text, in order (core/Taste.kt). Sent in batches of
+     * [EMBED_BATCH]; a slow or failed batch is tried once more.
+     */
+    suspend fun embed(texts: List<String>): List<FloatArray> {
+        if (texts.isEmpty()) return emptyList()
+        checkKey()
+        return texts.chunked(EMBED_BATCH).flatMap { batch -> withRetry { embedBatch(batch) } }
+    }
+
+    private suspend fun embedBatch(texts: List<String>): List<FloatArray> {
+        val body = buildJsonObject {
+            putJsonArray("requests") {
+                for (t in texts) add(
+                    buildJsonObject {
+                        put("model", "models/$embedModel")
+                        putJsonObject("content") { putJsonArray("parts") { add(buildJsonObject { put("text", t) }) } }
+                    },
+                )
+            }
+        }
+        val req = Request.Builder()
+            .url("$base/models/$embedModel:batchEmbedContents")
+            .header("x-goog-api-key", key)
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        val vectors = client.newCall(req).await().use { res ->
+            val raw = withContext(Dispatchers.IO) { res.body?.string().orEmpty() }
+            if (!res.isSuccessful) throw GeminiHttpException(res.code, raw)
+            json.parseToJsonElement(raw).jsonObject["embeddings"]?.jsonArray?.map { e ->
+                val values = e.jsonObject["values"]?.jsonArray.orEmpty()
+                FloatArray(values.size) { values[it].jsonPrimitive.float }
+            }.orEmpty()
+        }
+        check(vectors.size == texts.size) { "Gemini 임베딩 응답이 모자라요 (${vectors.size}/${texts.size})." }
+        return vectors
+    }
+
+    private fun checkKey() = check(key.isNotEmpty()) { "Gemini API 키가 없어요. local.properties의 GEMINI_API_KEY를 설정하세요." }
+
+    private suspend fun <T> withRetry(block: suspend () -> T): T = try {
+        block()
+    } catch (e: Exception) {
+        if (e is CancellationException || !isRetryable(e)) throw e
+        delay(retryDelayMs)
+        block()
+    }
 
     /** Reads a (masked) screenshot image. */
     suspend fun extract(base64Jpeg: String): Extracted = generate(
@@ -112,14 +168,8 @@ class GeminiClient(
     )
 
     private suspend fun generate(input: JsonObject): Extracted {
-        check(key.isNotEmpty()) { "Gemini API 키가 없어요. local.properties의 GEMINI_API_KEY를 설정하세요." }
-        return try {
-            request(input)
-        } catch (e: Exception) {
-            if (e is CancellationException || !isRetryable(e)) throw e
-            delay(retryDelayMs)
-            request(input)
-        }
+        checkKey()
+        return withRetry { request(input) }
     }
 
     private suspend fun request(input: JsonObject): Extracted {

@@ -18,6 +18,12 @@ import com.capstone.snapspot.core.RouteMemo
 import com.capstone.snapspot.core.RouteResult
 import com.capstone.snapspot.core.RouteSelection
 import com.capstone.snapspot.core.Stop
+import com.capstone.snapspot.core.Suggestion
+import com.capstone.snapspot.core.MIN_TASTE_SAVES
+import com.capstone.snapspot.core.placeFromSuggestion
+import com.capstone.snapspot.core.savedTasteText
+import com.capstone.snapspot.core.suggestNearby
+import com.capstone.snapspot.BuildConfig
 import com.capstone.snapspot.core.WalkPath
 import com.capstone.snapspot.core.branchSpotId
 import com.capstone.snapspot.core.brandGroups
@@ -54,7 +60,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
@@ -62,6 +71,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** net: Android "Google Location Accuracy". When it is off, the OS drops every geofence. */
@@ -102,6 +112,10 @@ data class RoutePlaceRequest(
 private data class RouteOptions(val withCoupons: Set<String>, val selection: RouteSelection?, val brands: List<String>, val openBundleId: String?)
 private data class CourseCouponKey(val bundleId: String, val stops: List<Coords>, val brands: List<String>, val edited: Boolean)
 private data class CourseCouponRequest(val key: CourseCouponKey, val places: List<Place>)
+
+/** Taste suggestions: tries per position before waiting for the next move, and the pause between them. */
+private const val SUGGEST_TRIES = 5
+private const val SUGGEST_RETRY_MS = 30_000L
 
 /** App-wide state behind the home screen (map + list), the status screen and the coupon screen. */
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
@@ -227,6 +241,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (!p.net || w == null) 0 else w.byGroup.values.sum()
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
+    /** Nearby places like the saved ones, for the places tab (empty until there are enough saves). */
+    private val _suggestions = MutableStateFlow<List<Suggestion>>(emptyList())
+    val suggestions: StateFlow<List<Suggestion>> = _suggestions.asStateFlow()
+
     init {
         refreshPerms()
         // While following, the map keeps the user in view and searches again after moving 1.5km.
@@ -247,6 +265,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 listOf(pl.map { it.id to it.radius }, cp.filter { it.usedAt == null }.map { it.id }, known, fg)
             }.distinctUntilChanged().collect { if (_perms.value.fg) resync() }
         }
+        // Suggestions: asked again when the user enters another ~1km cell or the saved names change.
+        viewModelScope.launch { watchSuggestions() }
         // A bundle's id changes when places come and go: keep its card open and its coupon switch on.
         viewModelScope.launch {
             bundles.collect { items -> follow(items.map { it.bundle }) }
@@ -319,6 +339,41 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 if (c.regionNames.cached(at) == null && namesTried.add(cellOf(at).key)) c.regionNames.resolve(at) { c.kakao.regionName(it) }
             }
         }
+    }
+
+    @OptIn(FlowPreview::class)
+    private suspend fun watchSuggestions() {
+        if (BuildConfig.GEMINI_API_KEY.isEmpty()) return
+        combine(here.filterNotNull(), c.repo.places) { at, list -> at to list }
+            .distinctUntilChanged { a, b -> cellOf(a.first).key == cellOf(b.first).key && a.second.map(::savedTasteText) == b.second.map(::savedTasteText) }
+            .debounce(1_000)
+            .collectLatest { (at, list) ->
+                if (list.size < MIN_TASTE_SAVES) {
+                    _suggestions.value = emptyList()
+                    return@collectLatest
+                }
+                // Offline or a failed call: try again a few times, until the user moves or the saves change.
+                repeat(SUGGEST_TRIES) { attempt ->
+                    try {
+                        _suggestions.value = suggestNearby(at, list, c.kakao, c.embeddings)
+                        return@collectLatest
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w("SnapSpot", "taste suggestions failed (try ${attempt + 1})", e)
+                        // The old list was for where the user was before; distances would be wrong.
+                        _suggestions.value = emptyList()
+                    }
+                    delay(SUGGEST_RETRY_MS)
+                }
+            }
+    }
+
+    /** Saves a suggestion as a place; it leaves the suggestions until they are asked again. */
+    fun saveSuggestion(s: Suggestion) = viewModelScope.launch {
+        val now = System.currentTimeMillis()
+        _suggestions.value = _suggestions.value.filter { it.kakaoId != s.kakaoId }
+        c.repo.upsertPlace(placeFromSuggestion(s, "p_${now.toString(36)}", now))
     }
 
     fun closeRoute() {

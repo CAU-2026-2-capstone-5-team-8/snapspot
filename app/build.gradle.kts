@@ -72,6 +72,16 @@ android {
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }
+            // ./gradlew :app:testDebugUnitTest -PtasteBench [-PtasteWrite]: taste recommendation accuracy, real Gemini embeddings (docs/taste.md).
+            if (project.hasProperty("tasteBench")) {
+                it.filter.includeTestsMatching("*TasteBench*")
+                it.systemProperty("taste.run", "true")
+                it.systemProperty("taste.write", project.hasProperty("tasteWrite").toString())
+                it.systemProperty("taste.out", rootProject.file("docs/taste.md").absolutePath)
+                it.systemProperty("taste.key", localProps.getProperty("GEMINI_API_KEY") ?: System.getenv("GEMINI_API_KEY") ?: "")
+                it.testLogging.showStandardStreams = true
+                it.outputs.upToDateWhen { false }
+            }
             // ./gradlew :app:testDebugUnitTest -ProuteBench [-ProuteWrite]: route algorithm benchmark (docs/route.md).
             if (project.hasProperty("routeBench")) {
                 it.filter.includeTestsMatching("*RouteBench*")
