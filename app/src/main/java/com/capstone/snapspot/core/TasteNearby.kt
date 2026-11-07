@@ -15,6 +15,17 @@ val TASTE_CATEGORIES = listOf("CE7", "FD6", "CT1", "AT4")
 /** One Kakao page per category (15 places), about the candidate count measured in docs/taste.md. */
 private const val TASTE_PAGE_SIZE = 15
 
+/** Keyword searches for the user's most saved kinds of place, on top of the category groups. */
+const val TASTE_QUERIES = 3
+
+/**
+ * The user's most saved categories ("술집", "디저트"), most frequent first, for keyword searches around
+ * them. The nearest 15 restaurants rarely include a bar or a dessert shop; this brings those in.
+ */
+fun tasteQueries(saved: List<Place>, max: Int = TASTE_QUERIES): List<String> =
+    saved.map { it.category.trim() }.filter { it.isNotEmpty() && it != "기타" }
+        .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(max).map { it.key }
+
 /** A nearby place the user has not saved. [category] is Kakao's last level ("디저트카페"). */
 data class Suggestion(
     val kakaoId: String,
@@ -36,6 +47,31 @@ fun interface Embedder {
 fun savedTasteText(p: Place): String = tasteText(p.name, p.category)
 
 /**
+ * Kakao places around [here] worth suggesting: every [TASTE_CATEGORIES] group within [TASTE_RADIUS_M],
+ * nearest first, plus keyword searches for [tasteQueries] when [byTaste], minus franchise branches and
+ * places already saved.
+ */
+suspend fun tasteCandidates(here: Coords, saved: List<Place>, api: KakaoApi, byTaste: Boolean = true): List<KakaoDoc> {
+    val seen = LinkedHashMap<String, KakaoDoc>()
+    val around = mapOf(
+        "x" to here.longitude.toString(),
+        "y" to here.latitude.toString(),
+        "radius" to TASTE_RADIUS_M.toString(),
+        "size" to TASTE_PAGE_SIZE.toString(),
+    )
+    for (code in TASTE_CATEGORIES) {
+        val docs = api.category(around + mapOf("category_group_code" to code, "sort" to "distance"))
+        for (d in docs) seen.putIfAbsent(d.id, d)
+    }
+    if (byTaste) for (q in tasteQueries(saved)) {
+        for (d in api.keyword(around + mapOf("query" to q))) seen.putIfAbsent(d.id, d)
+    }
+    return seen.values.filter { d -> !isFranchise(d) }.filter { d ->
+        findDuplicatePlace(saved, d.place_name, d.id, Coords(d.y.toDouble(), d.x.toDouble())) == null
+    }
+}
+
+/**
  * Up to [limit] nearby places that stand out against the other candidates by how close they are to
  * the user's saves. Empty with fewer than [MIN_TASTE_SAVES] saves. Only names and categories are
  * embedded; addresses and coordinates stay on the phone.
@@ -46,25 +82,10 @@ suspend fun suggestNearby(
     api: KakaoApi,
     embedder: Embedder,
     limit: Int = 3,
+    byTaste: Boolean = true,
 ): List<Suggestion> {
     if (saved.size < MIN_TASTE_SAVES) return emptyList()
-    val seen = LinkedHashMap<String, KakaoDoc>()
-    for (code in TASTE_CATEGORIES) {
-        val docs = api.category(
-            mapOf(
-                "category_group_code" to code,
-                "x" to here.longitude.toString(),
-                "y" to here.latitude.toString(),
-                "radius" to TASTE_RADIUS_M.toString(),
-                "size" to TASTE_PAGE_SIZE.toString(),
-                "sort" to "distance",
-            ),
-        )
-        for (d in docs) seen.putIfAbsent(d.id, d)
-    }
-    val candidates = seen.values.filter { d -> !isFranchise(d) }.filter { d ->
-        findDuplicatePlace(saved, d.place_name, d.id, Coords(d.y.toDouble(), d.x.toDouble())) == null
-    }
+    val candidates = tasteCandidates(here, saved, api, byTaste)
     if (candidates.isEmpty()) return emptyList()
 
     val savedTexts = saved.map(::savedTasteText)

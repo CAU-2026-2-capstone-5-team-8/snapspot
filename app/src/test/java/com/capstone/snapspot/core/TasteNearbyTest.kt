@@ -20,10 +20,14 @@ class TasteNearbyTest {
         place_url = "http://place.map.kakao.com/$id",
     )
 
-    /** Kakao answers per category group code; records the parameters. */
-    private class CategoryKakao(private val byCode: Map<String, List<KakaoDoc>>) : KakaoApi {
+    /** Kakao answers per category group code and per keyword; records the parameters. */
+    private class CategoryKakao(private val byCode: Map<String, List<KakaoDoc>>, private val byQuery: Map<String, List<KakaoDoc>> = emptyMap()) : KakaoApi {
         val asked = mutableListOf<Map<String, String>>()
-        override suspend fun keyword(params: Map<String, String>) = emptyList<KakaoDoc>()
+        val queries = mutableListOf<Map<String, String>>()
+        override suspend fun keyword(params: Map<String, String>): List<KakaoDoc> {
+            queries += params
+            return byQuery[params.getValue("query")].orEmpty()
+        }
         override suspend fun address(query: String) = emptyList<AddressDoc>()
         override suspend fun category(params: Map<String, String>): List<KakaoDoc> {
             asked += params
@@ -84,6 +88,29 @@ class TasteNearbyTest {
         suggestNearby(here, saved, kakao, WordEmbedder())
         assertEquals(TASTE_CATEGORIES, kakao.asked.map { it["category_group_code"] })
         assertTrue(kakao.asked.all { it["radius"] == "1000" && it["x"] == here.longitude.toString() && it["y"] == here.latitude.toString() })
+    }
+
+    @Test
+    fun `searches the most saved categories around the user, most frequent first`() = runTest {
+        suggestNearby(here, saved, kakao, WordEmbedder())
+        assertEquals(listOf("디저트카페", "베이커리"), kakao.queries.map { it["query"] })
+        assertTrue(kakao.queries.all { it["radius"] == "1000" && it["x"] == here.longitude.toString() && it["y"] == here.latitude.toString() })
+    }
+
+    @Test
+    fun `at most three kinds are searched, and 기타 is not one`() {
+        val many = listOf("술집", "술집", "디저트", "전시", "공원", "기타", "기타", "기타").mapIndexed { i, c -> place("p$i", c) }
+        assertEquals(listOf("술집", "디저트", "전시"), tasteQueries(many))
+    }
+
+    @Test
+    fun `a place only the keyword search finds can be suggested`() = runTest {
+        val k = CategoryKakao(
+            mapOf("FD6" to listOf(doc("4", "성수술집", "음식점 > 술집"), doc("5", "김밥천국", "음식점 > 분식"), doc("6", "국밥집", "음식점 > 한식"), doc("7", "짜장면집", "음식점 > 중식"))),
+            mapOf("디저트카페" to listOf(doc("1", "달콤디저트", "음식점 > 카페 > 디저트카페"))),
+        )
+        assertEquals("1", suggestNearby(here, saved, k, WordEmbedder()).first().kakaoId)
+        assertTrue(suggestNearby(here, saved, CategoryKakao(emptyMap(), mapOf("디저트카페" to listOf(doc("1", "달콤디저트", "디저트카페")))), WordEmbedder(), byTaste = false).isEmpty())
     }
 
     @Test

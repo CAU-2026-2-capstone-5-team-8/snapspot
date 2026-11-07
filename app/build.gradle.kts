@@ -82,6 +82,17 @@ android {
                 it.testLogging.showStandardStreams = true
                 it.outputs.upToDateWhen { false }
             }
+            // ./gradlew :app:testDebugUnitTest -PtasteLive [-PtasteLiveWrite]: taste suggestions against real Kakao and Gemini (docs/taste-live.md).
+            if (project.hasProperty("tasteLive")) {
+                it.filter.includeTestsMatching("*TasteLive*")
+                it.systemProperty("taste.live.run", "true")
+                it.systemProperty("taste.live.write", project.hasProperty("tasteLiveWrite").toString())
+                it.systemProperty("taste.live.out", rootProject.file("docs/taste-live.md").absolutePath)
+                it.systemProperty("taste.key", localProps.getProperty("GEMINI_API_KEY") ?: System.getenv("GEMINI_API_KEY") ?: "")
+                it.systemProperty("taste.kakao", localProps.getProperty("KAKAO_REST_KEY") ?: System.getenv("KAKAO_REST_KEY") ?: "")
+                it.testLogging.showStandardStreams = true
+                it.outputs.upToDateWhen { false }
+            }
             // ./gradlew :app:testDebugUnitTest -ProuteBench [-ProuteWrite]: route algorithm benchmark (docs/route.md).
             if (project.hasProperty("routeBench")) {
                 it.filter.includeTestsMatching("*RouteBench*")
