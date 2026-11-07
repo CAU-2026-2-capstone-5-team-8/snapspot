@@ -4,6 +4,7 @@ import com.capstone.snapspot.core.model.Branch
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import kotlin.coroutines.cancellation.CancellationException
@@ -13,6 +14,28 @@ class RouteSelectionTest {
     private val b = place(id = "b", latitude = 37.541, longitude = 127.05)
     private val c = place(id = "c", latitude = 37.542, longitude = 127.05)
     private val far = place(id = "far", latitude = 37.60, longitude = 127.10)
+
+    @Test
+    fun `the walking start keeps the existing 1km cutoff`() {
+        val here = Coords(0.0, 0.0)
+        fun north(meters: Double) = a.copy(latitude = Math.toDegrees(meters / 6_371_000.0), longitude = 0.0)
+        assertEquals(here, walkingRouteStart(listOf(north(999.0)), here))
+        assertNull(walkingRouteStart(listOf(north(1001.0)), here))
+    }
+
+    @Test
+    fun `the start follows chosen places even when the nearby place is not first`() {
+        val here = Coords(a.latitude, a.longitude)
+        assertEquals(here, walkingRouteStart(listOf(far, a), here))
+        assertNull(walkingRouteStart(listOf(far), here))
+        assertEquals(here, walkingRouteStart(listOf(a, far), here))
+    }
+
+    @Test
+    fun `an unknown location or empty selection cannot claim a current-location start`() {
+        assertNull(walkingRouteStart(listOf(a, b), null))
+        assertNull(walkingRouteStart(emptyList(), Coords(a.latitude, a.longitude)))
+    }
 
     @Test
     fun `a course can remove a bundle member and add a place outside the bundle`() {

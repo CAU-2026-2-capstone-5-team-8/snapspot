@@ -40,6 +40,7 @@ import com.capstone.snapspot.core.selectedRoutePlaces
 import com.capstone.snapspot.core.stopsOf
 import com.capstone.snapspot.core.walkKey
 import com.capstone.snapspot.core.walkMinutes
+import com.capstone.snapspot.core.walkingRouteStart
 import com.capstone.snapspot.core.walkPath
 import com.capstone.snapspot.geofence.RecheckWorker
 import com.capstone.snapspot.geofence.SyncResult
@@ -183,7 +184,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             val orderedIds = selection?.orderedPlaceIds.orEmpty().filter { it in availableIds }.distinct()
             val orderedStops = orderedIds.map { id -> places.indexOfFirst { it.id == id } }
             val edited = places.map { it.id }.toSet() != b.places.map { it.id }.toSet()
-            val start = at?.takeIf { a -> places.any { distanceMeters(a, Coords(it.latitude, it.longitude)) <= 1000 } }
+            val start = walkingRouteStart(places, at)
             val withCoupons = b.id in options.withCoupons && options.brands.isNotEmpty()
             val key = CourseCouponKey(b.id, places.map { Coords(it.latitude, it.longitude) }, options.brands, edited)
             val fetched = if (withCoupons) found[key] else null
