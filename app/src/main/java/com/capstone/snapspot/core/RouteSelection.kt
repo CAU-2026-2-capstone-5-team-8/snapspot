@@ -13,6 +13,10 @@ data class RouteSelection(val bundleId: String, val placeIds: Set<String>, val o
 fun selectedRoutePlaces(places: List<Place>, ids: Set<String>, now: Long): List<Place> =
     places.filter { it.id in ids && !placeEnded(it, now) }.distinctBy { it.id }.sortedBy { it.id }
 
+/** Include the user's approach only when at least one chosen place is within 1km. */
+fun walkingRouteStart(places: List<Place>, here: Coords?): Coords? =
+    here?.takeIf { at -> places.any { distanceMeters(at, Coords(it.latitude, it.longitude)) <= 1000 } }
+
 /** Keep a chosen first place; otherwise recommend the nearest selected place by straight-line distance. */
 fun firstRoutePlace(places: List<Place>, preferredId: String?, here: Coords?): Place? =
     places.firstOrNull { it.id == preferredId }

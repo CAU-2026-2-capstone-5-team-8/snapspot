@@ -62,6 +62,7 @@ import com.capstone.snapspot.core.model.Place
 import com.capstone.snapspot.core.moveRoutePlace
 import com.capstone.snapspot.core.placeEnded
 import com.capstone.snapspot.core.recommendRouteOrder
+import com.capstone.snapspot.core.walkingRouteStart
 import com.capstone.snapspot.ui.components.IconTap
 import com.capstone.snapspot.ui.components.PrimaryButton
 import com.capstone.snapspot.ui.components.Shot
@@ -162,6 +163,9 @@ internal fun RoutePlacePicker(
                     else "자동 정렬은 현재 위치에서 가까운 곳을 1번으로 추천해요.",
                     style = SnapType.meta,
                 )
+            }
+            if (selected.isNotEmpty()) {
+                RouteStartNotice(walkingRouteStart(selected, here) != null, locationKnown = here != null)
             }
             LazyColumn(
                 state = list, modifier = Modifier.weight(1f).fillMaxWidth(),

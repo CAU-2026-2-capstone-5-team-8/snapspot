@@ -331,6 +331,9 @@ fun HomeScreen(
                                 }
                             }
                         }
+                        item(key = "route-start") {
+                            RouteStartNotice(open.start != null, locationKnown = here != null)
+                        }
                         if (open.couponsLoading) item(key = "bundle-loading") {
                             Notice("이 코스에서 쓸 기프티콘 지점을 찾고 있어요.", modifier = Modifier.padding(bottom = SnapSpace.gap))
                         }
